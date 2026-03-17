@@ -1,0 +1,73 @@
+"""FilesystemTool: sandboxed file read/write operations."""
+
+from __future__ import annotations
+
+import fnmatch
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
+from autodev.tools.base import Tool
+
+logger = logging.getLogger(__name__)
+
+
+class FilesystemTool(Tool):
+    """Provides file operations sandboxed to a configured base path."""
+
+    def __init__(self, base_path: str | None = None) -> None:
+        self.base_path = Path(base_path).resolve() if base_path else None
+
+    def execute(self, input: dict[str, Any]) -> dict[str, Any]:
+        action = input.get("action", "")
+        if action == "read":
+            return {"content": self.read_file(input["path"])}
+        if action == "write":
+            self.write_file(input["path"], input["content"])
+            return {"ok": True}
+        if action == "list":
+            return {"files": self.list_files(input["path"], input.get("pattern", "*"))}
+        raise ValueError(f"Unknown action: {action!r}")
+
+    # ------------------------------------------------------------------
+    # Operations
+    # ------------------------------------------------------------------
+
+    def read_file(self, path: str) -> str:
+        resolved = self._resolve(path)
+        logger.debug("Reading file: %s", resolved)
+        return resolved.read_text(encoding="utf-8")
+
+    def write_file(self, path: str, content: str) -> None:
+        resolved = self._resolve(path)
+        logger.debug("Writing file: %s", resolved)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content, encoding="utf-8")
+
+    def list_files(self, dir_path: str, pattern: str = "*") -> list[str]:
+        resolved = self._resolve(dir_path)
+        matches: list[str] = []
+        for root, _dirs, files in os.walk(resolved):
+            for fname in files:
+                if fnmatch.fnmatch(fname, pattern):
+                    matches.append(os.path.join(root, fname))
+        return matches
+
+    def file_exists(self, path: str) -> bool:
+        try:
+            return self._resolve(path).exists()
+        except (ValueError, OSError):
+            return False
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _resolve(self, path: str) -> Path:
+        target = Path(path).resolve()
+        if self.base_path is not None and not str(target).startswith(str(self.base_path)):
+            raise ValueError(
+                f"Path {path!r} is outside the allowed base path {self.base_path!r}"
+            )
+        return target

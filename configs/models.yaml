@@ -1,0 +1,6 @@
+models:
+  planner: claude-sonnet
+  coder: gpt-4.1
+  reviewer: claude-opus
+  debugger: gpt-4.1
+  default: gpt-4.1
