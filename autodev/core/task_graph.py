@@ -83,19 +83,19 @@ class TaskGraph:
 
     @classmethod
     def default_pipeline(cls) -> "TaskGraph":
-        """Return the standard plan → code → test → review pipeline."""
+        """Return the standard plan → implement → validate → review pipeline."""
         graph = cls()
         for name, agent in [
             ("plan", "planner"),
-            ("code", "coder"),
-            ("test", "tester"),
+            ("implement", "implementer"),
+            ("validate", "validator"),
             ("review", "reviewer"),
         ]:
             graph.add_node(TaskNode(name=name, agent_type=agent))
 
-        graph.add_edge("plan", "code")
-        graph.add_edge("code", "test")
-        graph.add_edge("test", "review")
+        graph.add_edge("plan", "implement")
+        graph.add_edge("implement", "validate")
+        graph.add_edge("validate", "review")
         return graph
 
     @property

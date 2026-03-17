@@ -5,7 +5,7 @@
 AutoDev uses a pipeline-driven architecture:
 
 ```
-issue → plan → code → test → review → PR
+issue → plan → implement → validate → review → PR
 ```
 
 ## Components
@@ -38,12 +38,12 @@ pipelines:
     max_iterations: 3
     stages:
       - name: plan
-      - name: code
+      - name: implement
         depends_on: [plan]
-      - name: test
-        depends_on: [code]
+      - name: validate
+        depends_on: [implement]
       - name: review
-        depends_on: [test]
+        depends_on: [validate]
 ```
 
 ## Environment Variables

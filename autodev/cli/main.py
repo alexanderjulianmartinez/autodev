@@ -46,15 +46,15 @@ def init() -> None:
             "    stages:\n"
             "      - name: plan\n"
             "        agent: planner\n"
-            "      - name: code\n"
-            "        agent: coder\n"
+            "      - name: implement\n"
+            "        agent: implementer\n"
             "        depends_on: [plan]\n"
-            "      - name: test\n"
-            "        agent: tester\n"
-            "        depends_on: [code]\n"
+            "      - name: validate\n"
+            "        agent: validator\n"
+            "        depends_on: [implement]\n"
             "      - name: review\n"
             "        agent: reviewer\n"
-            "        depends_on: [test]\n"
+            "        depends_on: [validate]\n"
         )
 
     console.print(
@@ -73,11 +73,11 @@ def run(
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
 ) -> None:
     """Run the full AutoDev pipeline for a GitHub issue."""
-    from autodev.core.runtime import RuntimeOrchestrator
+    from autodev.core.runtime import Orchestrator
 
     console.print(f"[bold]Processing:[/bold] {issue_url}")
     try:
-        orchestrator = RuntimeOrchestrator(
+        orchestrator = Orchestrator(
             max_iterations=max_iterations,
             dry_run=dry_run,
         )

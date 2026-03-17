@@ -15,9 +15,17 @@ class AgentContext(BaseModel):
     repo_path: str = ""
     plan: list[str] = Field(default_factory=list)
     files_modified: list[str] = Field(default_factory=list)
-    test_results: str = ""
+    validation_results: str = ""
     iteration: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def test_results(self) -> str:
+        return self.validation_results
+
+    @test_results.setter
+    def test_results(self, value: str) -> None:
+        self.validation_results = value
 
 
 class Agent(ABC):

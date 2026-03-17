@@ -1,4 +1,4 @@
-"""DebuggerAgent: analyzes test failures and suggests patches."""
+"""DebuggerAgent: analyzes validation failures and suggests patches."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class DebuggerAgent(Agent):
-    """Reads test failure output and proposes fixes."""
+    """Reads validation failure output and proposes fixes."""
 
     def run(self, task: str, context: AgentContext) -> AgentContext:
         logger.info("DebuggerAgent running task: %s", task)
@@ -18,13 +18,13 @@ class DebuggerAgent(Agent):
         new_iteration = context.iteration + 1
         metadata = dict(context.metadata)
 
-        if context.test_results:
-            logger.info("Analyzing test results for patches...")
+        if context.validation_results:
+            logger.info("Analyzing validation results for patches...")
             metadata["debug_suggestion"] = (
-                f"Patch attempt #{new_iteration}: review failing tests in test_results."
+                f"Patch attempt #{new_iteration}: review failing checks in validation_results."
             )
         else:
-            metadata["debug_suggestion"] = "No test results available to analyze."
+            metadata["debug_suggestion"] = "No validation results available to analyze."
 
         context = context.model_copy(update={"iteration": new_iteration, "metadata": metadata})
         return context

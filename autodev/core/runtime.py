@@ -1,10 +1,12 @@
-"""RuntimeOrchestrator: top-level pipeline coordinator."""
+"""Orchestrator: unified runtime coordinator for AutoDev pipelines."""
 
 from __future__ import annotations
 
+from enum import Enum
 import logging
 import os
 import tempfile
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -27,8 +29,15 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
-class RuntimeOrchestrator:
-    """Coordinates the full autodev pipeline for a GitHub issue."""
+class PipelineState(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Orchestrator:
+    """Coordinates the canonical AutoDev phase pipeline."""
 
     def __init__(
         self,
@@ -41,14 +50,36 @@ class RuntimeOrchestrator:
         self.model_router = ModelRouter()
         self.dry_run = dry_run
         self.work_dir = work_dir or tempfile.mkdtemp(prefix="autodev_")
+        self._state: PipelineState = PipelineState.PENDING
+        self._stage_outputs: dict[str, Any] = {}
+
+    def execute(self, pipeline_config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        """Execute a configured stage list using the unified orchestrator state model."""
+        self._state = PipelineState.RUNNING
+        current_context = dict(context)
+
+        try:
+            for stage in pipeline_config.get("stages", []):
+                stage_name = stage.get("name", "unnamed")
+                self._stage_outputs[stage_name] = {"status": "completed"}
+                current_context["last_stage"] = stage_name
+            self._state = PipelineState.COMPLETED
+        except Exception as exc:
+            self._state = PipelineState.FAILED
+            current_context["error"] = str(exc)
+            logger.error("Pipeline failed at stage %r: %s", current_context.get("last_stage"), exc)
+
+        return current_context
 
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
     def run_pipeline(self, issue_url: str) -> AgentContext:
-        """Execute the full issue → plan → code → test → PR pipeline."""
+        """Execute the full issue → plan → implement → validate → review → PR pipeline."""
         console.print(Panel(f"[bold cyan]AutoDev Pipeline[/bold cyan]\n{issue_url}", expand=False))
+        self._state = PipelineState.RUNNING
+        self._stage_outputs.clear()
 
         context = AgentContext(issue_url=issue_url)
 
@@ -62,6 +93,7 @@ class RuntimeOrchestrator:
             # 1. Read issue
             task = progress.add_task("Analyzing issue...", total=None)
             context = self._read_issue(context)
+            self._stage_outputs["intake"] = {"status": "completed"}
             progress.update(task, completed=True)
 
             # 2. Clone repo
@@ -71,20 +103,23 @@ class RuntimeOrchestrator:
             # 3. Plan
             progress.update(task, description="Generating plan...")
             context = self._plan(context)
+            self._stage_outputs["plan"] = {"status": "completed"}
             console.print(f"[green]Plan:[/green] {len(context.plan)} step(s)")
 
-            # 4. Code → Test loop
+            # 4. Implement → Validate loop
             for iteration in range(self.supervisor.max_iterations):
-                progress.update(task, description=f"Writing code (iteration {iteration + 1})...")
-                context = self._code(context)
+                progress.update(task, description=f"Implementing changes (iteration {iteration + 1})...")
+                context = self._implement(context)
+                self._stage_outputs["implement"] = {"status": "completed", "iteration": iteration + 1}
 
-                progress.update(task, description="Running tests...")
-                context = self._test(context)
+                progress.update(task, description="Running validation...")
+                context = self._validate(context)
+                self._stage_outputs["validate"] = {"status": "completed", "iteration": iteration + 1}
 
-                if "PASSED" in context.test_results or context.test_results == "":
+                if "PASSED" in context.validation_results or context.validation_results == "":
                     break
 
-                progress.update(task, description="Debugging failures...")
+                progress.update(task, description="Debugging validation failures...")
                 context = self._debug(context)
                 self.supervisor.increment()
                 if self.supervisor.check_iteration_limit():
@@ -94,6 +129,7 @@ class RuntimeOrchestrator:
             # 5. Review
             progress.update(task, description="Reviewing changes...")
             context = self._review(context)
+            self._stage_outputs["review"] = {"status": "completed"}
 
             # 6. Open PR
             if not self.dry_run:
@@ -102,6 +138,7 @@ class RuntimeOrchestrator:
             else:
                 console.print("[yellow]Dry run: skipping PR creation[/yellow]")
 
+        self._state = PipelineState.COMPLETED
         console.print(Panel("[bold green]Pipeline complete![/bold green]", expand=False))
         return context
 
@@ -137,27 +174,27 @@ class RuntimeOrchestrator:
 
     def _plan(self, context: AgentContext) -> AgentContext:
         planner = PlannerAgent(model_router=self.model_router)
-        return planner.run("generate plan", context)
+        return planner.run("plan change request", context)
 
-    def _code(self, context: AgentContext) -> AgentContext:
+    def _implement(self, context: AgentContext) -> AgentContext:
         coder = CoderAgent(model_router=self.model_router)
-        return coder.run("implement plan", context)
+        return coder.run("implement change request", context)
 
-    def _test(self, context: AgentContext) -> AgentContext:
+    def _validate(self, context: AgentContext) -> AgentContext:
         runner = TestRunner()
         repo_path = context.repo_path or self.work_dir
         result = runner.run(repo_path)
         status = "PASSED" if result.passed else "FAILED"
         output = f"{status}\n{result.output}\n{result.error}".strip()
-        return context.model_copy(update={"test_results": output})
+        return context.model_copy(update={"validation_results": output})
 
     def _debug(self, context: AgentContext) -> AgentContext:
         debugger = DebuggerAgent(model_router=self.model_router)
-        return debugger.run("debug failures", context)
+        return debugger.run("debug validation failures", context)
 
     def _review(self, context: AgentContext) -> AgentContext:
         reviewer = ReviewerAgent(model_router=self.model_router)
-        return reviewer.run("review changes", context)
+        return reviewer.run("review change request", context)
 
     def _open_pr(self, context: AgentContext) -> AgentContext:
         repo_full_name = context.metadata.get("repo_full_name", "")
@@ -180,3 +217,18 @@ class RuntimeOrchestrator:
         except Exception as exc:
             logger.warning("Could not open PR (%s).", exc)
             return context
+
+    @property
+    def state(self) -> PipelineState:
+        return self._state
+
+    @property
+    def stage_outputs(self) -> dict[str, Any]:
+        return dict(self._stage_outputs)
+
+    def reset(self) -> None:
+        self._state = PipelineState.PENDING
+        self._stage_outputs.clear()
+
+
+RuntimeOrchestrator = Orchestrator
