@@ -2,7 +2,7 @@
 
 import pytest
 
-from autodev.core.runtime import Orchestrator, PipelineState
+from autodev.core import Orchestrator, PipelineState
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskNode
 

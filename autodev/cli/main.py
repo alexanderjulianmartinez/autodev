@@ -73,7 +73,7 @@ def run(
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
 ) -> None:
     """Run the full AutoDev pipeline for a GitHub issue."""
-    from autodev.core.runtime import Orchestrator
+    from autodev.core import Orchestrator
 
     console.print(f"[bold]Processing:[/bold] {issue_url}")
     try:

@@ -35,6 +35,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-16
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
+- **Completion notes:** canonical phase naming is now `plan -> implement -> validate -> review`, and the public runtime entrypoint is the unified `Orchestrator` export.
 - **Problem:** The current code mixes older names such as `code` and `test` with the newer design language of `implement` and `validate`, and it has both a simple `Orchestrator` and a separate `RuntimeOrchestrator`.
 - **Scope:** Standardize on one runtime vocabulary and one primary execution entrypoint across CLI, runtime, tests, and docs.
 - **Acceptance criteria:**

@@ -1,4 +1,4 @@
-"""Compatibility re-export for the unified orchestrator implementation."""
+"""Canonical public orchestrator exports for the AutoDev runtime."""
 
 from autodev.core.runtime import Orchestrator, PipelineState
 

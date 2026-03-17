@@ -46,7 +46,7 @@ AlphaDesk repeatedly uses the same phased execution shape:
 
 - `plan`
 - `implement`
-- `test`
+- `validate`
 - `review`
 - optional `deploy`
 
@@ -60,7 +60,7 @@ Recommended semantics:
 - `review`: verify acceptance criteria, summarize diff, check policy/safety rules, request approval if needed
 - `merge` or `deploy`: optional promotion step once review and approval conditions are satisfied
 
-For AutoDev, rename `test` to `validate` if the phase may include linting, typing, build checks, contract tests, or smoke tests.
+For AutoDev, keep `validate` as the canonical phase name because the stage may include linting, typing, build checks, contract tests, or smoke tests.
 
 ### 3. Materialize tasks from backlog items at runtime
 
