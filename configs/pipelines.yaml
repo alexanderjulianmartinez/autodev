@@ -1,0 +1,20 @@
+pipelines:
+  default:
+    name: minimal
+    max_iterations: 3
+    stages:
+      - name: plan
+        agent: planner
+        model: planner
+      - name: code
+        agent: coder
+        model: coder
+        depends_on: [plan]
+      - name: test
+        agent: tester
+        model: coder
+        depends_on: [code]
+      - name: review
+        agent: reviewer
+        model: reviewer
+        depends_on: [test]
