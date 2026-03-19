@@ -1,4 +1,4 @@
-"""Unified orchestrator implementation for the AutoDev runtime."""
+"""Orchestrator: unified runtime coordinator for AutoDev pipelines."""
 
 from __future__ import annotations
 
@@ -229,3 +229,6 @@ class Orchestrator:
     def reset(self) -> None:
         self._state = PipelineState.PENDING
         self._stage_outputs.clear()
+
+
+RuntimeOrchestrator = Orchestrator

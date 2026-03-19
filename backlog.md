@@ -35,7 +35,6 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-16
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
-- **Completion notes:** canonical phase naming is now `plan -> implement -> validate -> review`, and the public runtime entrypoint is the unified `Orchestrator` export.
 - **Problem:** The current code mixes older names such as `code` and `test` with the newer design language of `implement` and `validate`, and it has both a simple `Orchestrator` and a separate `RuntimeOrchestrator`.
 - **Scope:** Standardize on one runtime vocabulary and one primary execution entrypoint across CLI, runtime, tests, and docs.
 - **Acceptance criteria:**
@@ -48,7 +47,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-18
 - **Priority:** `priority:p0`
 - **Type:** `type:docs`
-- **Completion notes:** added [architecture_inventory.md](architecture_inventory.md), which maps every major `autodev/` package to a target subsystem and calls out duplicate and legacy scaffold abstractions.
+- **Completion notes:** added [docs/architecture_inventory.md](docs/architecture_inventory.md), which maps every major `autodev/` package to a target subsystem and calls out duplicate and legacy scaffold abstractions.
 - **Problem:** The repo contains working stubs, but there is no explicit gap analysis between the current implementation and the target architecture.
 - **Scope:** Produce a short architecture inventory that marks modules as keep, refactor, replace, or remove.
 - **Acceptance criteria:**
@@ -63,7 +62,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-18
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
-- **Completion notes:** added durable Pydantic runtime schemas in [../autodev/core/schemas.py](../autodev/core/schemas.py) for backlog items, tasks, task results, run metadata, validation results, failure classifications, and review decisions, with focused round-trip coverage in [../tests/test_schemas.py](../tests/test_schemas.py).
+- **Completion notes:** added durable Pydantic runtime schemas in [autodev/core/schemas.py](autodev/core/schemas.py) for backlog items, tasks, task results, run metadata, validation results, failure classifications, and review decisions, with focused round-trip coverage in [tests/test_schemas.py](tests/test_schemas.py).
 - **Problem:** The current `AgentContext` is transient and not sufficient for resumable, inspectable execution.
 - **Scope:** Introduce stable Pydantic models for backlog, task, run metadata, validation results, failure classifications, and review decisions.
 - **Acceptance criteria:**
@@ -76,7 +75,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-18
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
-- **Completion notes:** added the file-backed [../autodev/core/state_store.py](../autodev/core/state_store.py) with predictable paths and atomic JSON writes for backlog items, tasks, runs, reports, reviews, and scheduler state/history, with persistence coverage in [../tests/test_state_store.py](../tests/test_state_store.py).
+- **Completion notes:** added the file-backed [autodev/core/state_store.py](autodev/core/state_store.py) with predictable paths and atomic JSON writes for backlog items, tasks, runs, reports, reviews, and scheduler state/history, with persistence coverage in [tests/test_state_store.py](tests/test_state_store.py).
 - **Problem:** There is no durable execution state, so runs cannot be resumed, inspected, or replayed.
 - **Scope:** Add a simple file-backed state store abstraction with predictable paths and atomic writes.
 - **Acceptance criteria:**
@@ -89,7 +88,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-18
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
-- **Completion notes:** added [../autodev/core/backlog_service.py](../autodev/core/backlog_service.py) on top of the file-backed store to create, update, list, and resolve durable backlog items with dependency validation, covered by [../tests/test_backlog_service.py](../tests/test_backlog_service.py).
+- **Completion notes:** added [autodev/core/backlog_service.py](autodev/core/backlog_service.py) on top of the file-backed store to create, update, list, and resolve durable backlog items with dependency validation, covered by [tests/test_backlog_service.py](tests/test_backlog_service.py).
 - **Problem:** The runtime currently starts directly from an issue URL instead of a durable backlog item.
 - **Scope:** Build a service that creates, updates, lists, and resolves backlog items with status, dependencies, priority, and acceptance criteria.
 - **Acceptance criteria:**
@@ -104,7 +103,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-18
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
-- **Completion notes:** added [../autodev/core/task_materializer.py](../autodev/core/task_materializer.py) to expand eligible backlog items into deterministic `plan`, `implement`, `validate`, and `review` tasks with dependency gating and duplicate prevention, covered by [../tests/test_task_materializer.py](../tests/test_task_materializer.py).
+- **Completion notes:** added [autodev/core/task_materializer.py](autodev/core/task_materializer.py) to expand eligible backlog items into deterministic `plan`, `implement`, `validate`, and `review` tasks with dependency gating and duplicate prevention, covered by [tests/test_task_materializer.py](tests/test_task_materializer.py).
 - **Problem:** The current runtime does not generate phase tasks from durable requests at runtime.
 - **Scope:** Materialize one backlog item or bounded batch into `plan`, `implement`, `validate`, and `review` tasks only when dependencies are satisfied.
 - **Acceptance criteria:**
@@ -117,7 +116,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-18
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
-- **Completion notes:** extended [../autodev/core/task_graph.py](../autodev/core/task_graph.py) with a deterministic `TaskScheduler` that validates task graphs, derives runnable tasks from completion state, and chooses the next task with a stable tie-break rule, covered by [../tests/test_scheduler.py](../tests/test_scheduler.py).
+- **Completion notes:** extended [autodev/core/task_graph.py](autodev/core/task_graph.py) with a deterministic `TaskScheduler` that validates task graphs, derives runnable tasks from completion state, and chooses the next task with a stable tie-break rule, covered by [tests/test_scheduler.py](tests/test_scheduler.py).
 - **Problem:** The current `TaskGraph` can sort nodes, but it does not schedule real tasks with priorities, retries, or run history.
 - **Scope:** Add scheduler logic that validates task graphs, computes runnable tasks, and picks the next task deterministically.
 - **Acceptance criteria:**
@@ -130,7 +129,7 @@ The biggest gaps are:
 - **Status:** completed on 2026-03-18
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
-- **Completion notes:** extended [../autodev/core/task_graph.py](../autodev/core/task_graph.py) with bounded retry/backoff handling, blocked-task reset behavior, and persisted scheduler retry state/history backed by [../autodev/core/state_store.py](../autodev/core/state_store.py), with focused coverage in [../tests/test_scheduler.py](../tests/test_scheduler.py).
+- **Completion notes:** extended [autodev/core/task_graph.py](autodev/core/task_graph.py) with bounded retry/backoff handling, blocked-task reset behavior, and persisted scheduler retry state/history backed by [autodev/core/state_store.py](autodev/core/state_store.py), with focused coverage in [tests/test_scheduler.py](tests/test_scheduler.py).
 - **Problem:** The current loop retries only as a local debug iteration and does not persist retry policy.
 - **Scope:** Track retry counts, next-eligible-at timestamps, and retry history per task or pipeline.
 - **Acceptance criteria:**

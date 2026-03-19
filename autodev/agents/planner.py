@@ -53,6 +53,6 @@ class PlannerAgent(Agent):
             f"1. Analyze the repository structure relevant to: {issue_title}",
             "2. Identify files that need modification",
             "3. Implement the required changes",
-            "4. Add or update validation coverage for the changes",
-            "5. Run validation and confirm the change meets the request",
+            "4. Add or update tests to cover the changes",
+            "5. Verify all tests pass",
         ]

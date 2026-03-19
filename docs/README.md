@@ -8,6 +8,8 @@ AutoDev uses a pipeline-driven architecture:
 issue → plan → implement → validate → review → PR
 ```
 
+- Architecture inventory: [architecture_inventory.md](architecture_inventory.md)
+
 ## Components
 
 - **Core**: Runtime orchestrator, task graph (DAG), supervisor (safety)
