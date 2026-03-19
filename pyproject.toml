@@ -24,8 +24,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "pre-commit>=4.1.0",
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
+    "ruff>=0.11.0",
 ]
 
 [project.scripts]
@@ -38,3 +40,14 @@ include = ["autodev*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

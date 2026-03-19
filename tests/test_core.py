@@ -1,8 +1,8 @@
-"""Tests for core components: TaskGraph, Supervisor, Orchestrator."""
+"""Tests for core components: TaskGraph, Supervisor, unified Orchestrator."""
 
 import pytest
 
-from autodev.core.orchestrator import Orchestrator, PipelineState
+from autodev.core.runtime import Orchestrator, PipelineState
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskNode
 
@@ -25,7 +25,7 @@ class TestTaskGraph:
     def test_get_execution_order_default_pipeline(self):
         graph = TaskGraph.default_pipeline()
         order = graph.get_execution_order()
-        assert order == ["plan", "code", "test", "review"]
+        assert order == ["plan", "implement", "validate", "review"]
 
     def test_cycle_detection(self):
         graph = TaskGraph()
@@ -80,9 +80,9 @@ class TestSupervisor:
 class TestOrchestrator:
     def test_execute_simple(self):
         orch = Orchestrator()
-        pipeline = {"stages": [{"name": "plan"}, {"name": "code"}]}
+        pipeline = {"stages": [{"name": "plan"}, {"name": "implement"}]}
         result = orch.execute(pipeline, {"issue_url": "https://github.com/a/b/issues/1"})
-        assert result["last_stage"] == "code"
+        assert result["last_stage"] == "implement"
 
     def test_execute_sets_completed_state(self):
         orch = Orchestrator()

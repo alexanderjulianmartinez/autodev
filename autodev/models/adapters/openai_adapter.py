@@ -17,6 +17,7 @@ class OpenAIAdapter:
             )
         try:
             import openai  # noqa: F401
+
             self._client = openai.OpenAI(api_key=api_key)
         except ImportError as exc:
             raise ImportError("openai package is required: pip install openai") from exc

@@ -39,17 +39,17 @@ class ReviewerAgent(Agent):
 
     def _stub_review(self, context: AgentContext) -> str:
         n = len(context.files_modified)
-        test_status = "passing" if "PASSED" in context.test_results else "unknown"
+        validation_status = "passing" if "PASSED" in context.validation_results else "unknown"
         return (
             f"Review complete. {n} file(s) modified. "
-            f"Tests are {test_status}. Changes look reasonable."
+            f"Validation is {validation_status}. Changes look reasonable."
         )
 
     def _model_review(self, context: AgentContext) -> str:
         prompt = (
             f"You are a senior engineer reviewing code changes.\n"
             f"Files modified: {context.files_modified}\n"
-            f"Test results: {context.test_results or 'not available'}\n"
+            f"Validation results: {context.validation_results or 'not available'}\n"
             f"Provide a brief 1-2 sentence assessment of the changes."
         )
         try:

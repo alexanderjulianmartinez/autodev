@@ -35,6 +35,7 @@ class GitTool(Tool):
     def clone(self, repo_url: str, dest_path: str) -> str:
         """Clone *repo_url* into *dest_path* and return the destination."""
         import git  # GitPython
+
         logger.info("Cloning %s → %s", repo_url, dest_path)
         git.Repo.clone_from(repo_url, dest_path)
         return dest_path
@@ -42,6 +43,7 @@ class GitTool(Tool):
     def create_branch(self, repo_path: str, branch_name: str) -> None:
         """Create and check out a new branch."""
         import git
+
         repo = git.Repo(repo_path)
         repo.git.checkout("-b", branch_name)
         logger.info("Created branch %r in %s", branch_name, repo_path)
@@ -54,6 +56,7 @@ class GitTool(Tool):
     ) -> None:
         """Stage *files* (or all changes) and create a commit."""
         import git
+
         repo = git.Repo(repo_path)
         if files:
             repo.index.add(files)
@@ -65,6 +68,7 @@ class GitTool(Tool):
     def push(self, repo_path: str, branch_name: str) -> None:
         """Push *branch_name* to the default remote."""
         import git
+
         repo = git.Repo(repo_path)
         origin = repo.remotes["origin"]
         origin.push(branch_name)

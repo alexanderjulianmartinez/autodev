@@ -46,21 +46,20 @@ def init() -> None:
             "    stages:\n"
             "      - name: plan\n"
             "        agent: planner\n"
-            "      - name: code\n"
-            "        agent: coder\n"
+            "      - name: implement\n"
+            "        agent: implementer\n"
             "        depends_on: [plan]\n"
-            "      - name: test\n"
-            "        agent: tester\n"
-            "        depends_on: [code]\n"
+            "      - name: validate\n"
+            "        agent: validator\n"
+            "        depends_on: [implement]\n"
             "      - name: review\n"
             "        agent: reviewer\n"
-            "        depends_on: [test]\n"
+            "        depends_on: [validate]\n"
         )
 
     console.print(
         Panel(
-            "[bold green]AutoDev initialized![/bold green]\n"
-            f"Config directory: {_CONFIG_DIR}",
+            f"[bold green]AutoDev initialized![/bold green]\nConfig directory: {_CONFIG_DIR}",
             title="autodev init",
         )
     )
@@ -73,11 +72,11 @@ def run(
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
 ) -> None:
     """Run the full AutoDev pipeline for a GitHub issue."""
-    from autodev.core.runtime import RuntimeOrchestrator
+    from autodev.core.runtime import Orchestrator
 
     console.print(f"[bold]Processing:[/bold] {issue_url}")
     try:
-        orchestrator = RuntimeOrchestrator(
+        orchestrator = Orchestrator(
             max_iterations=max_iterations,
             dry_run=dry_run,
         )
@@ -86,7 +85,7 @@ def run(
             console.print(f"\n[green]PR:[/green] {context.metadata['pr_url']}")
     except Exception as exc:
         console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command(name="fix-ci")

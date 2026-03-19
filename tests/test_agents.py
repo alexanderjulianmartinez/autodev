@@ -56,7 +56,7 @@ class TestReviewerAgent:
         agent = ReviewerAgent()
         ctx = AgentContext(
             files_modified=["auth.py"],
-            test_results="PASSED",
+            validation_results="PASSED",
         )
         result = agent.run("review changes", ctx)
         assert "review" in result.metadata
@@ -72,18 +72,18 @@ class TestReviewerAgent:
 class TestDebuggerAgent:
     def test_run_increments_iteration(self):
         agent = DebuggerAgent()
-        ctx = AgentContext(iteration=0, test_results="FAILED: assertion error")
+        ctx = AgentContext(iteration=0, validation_results="FAILED: assertion error")
         result = agent.run("debug failures", ctx)
         assert result.iteration == 1
 
     def test_run_adds_debug_suggestion(self):
         agent = DebuggerAgent()
-        ctx = AgentContext(iteration=1, test_results="FAILED: timeout")
+        ctx = AgentContext(iteration=1, validation_results="FAILED: timeout")
         result = agent.run("debug failures", ctx)
         assert "debug_suggestion" in result.metadata
 
-    def test_run_no_test_results(self):
+    def test_run_no_validation_results(self):
         agent = DebuggerAgent()
-        ctx = AgentContext(iteration=0, test_results="")
+        ctx = AgentContext(iteration=0, validation_results="")
         result = agent.run("debug failures", ctx)
         assert "analyze" in result.metadata["debug_suggestion"].lower()

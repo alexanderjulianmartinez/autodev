@@ -68,14 +68,18 @@ class ModelRouter:
     def _build_adapter(self, provider: str) -> Any:
         if provider == "openai":
             from autodev.models.adapters.openai_adapter import OpenAIAdapter
+
             return OpenAIAdapter()
         if provider == "anthropic":
             from autodev.models.adapters.anthropic_adapter import AnthropicAdapter
+
             return AnthropicAdapter()
         if provider == "gemini":
             from autodev.models.adapters.gemini_adapter import GeminiAdapter
+
             return GeminiAdapter()
         from autodev.models.adapters.local_adapter import LocalAdapter
+
         return LocalAdapter()
 
     # ------------------------------------------------------------------

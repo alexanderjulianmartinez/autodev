@@ -12,7 +12,7 @@ BLOCKED_PATTERNS: list[str] = [
     "sudo",
     "mkfs",
     "dd if=",
-    ":(){:",      # fork bomb
+    ":(){:",  # fork bomb
     "chmod 777 /",
     "wget http",  # network exfiltration helpers
     "curl http",

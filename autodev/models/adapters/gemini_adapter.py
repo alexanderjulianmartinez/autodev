@@ -17,6 +17,7 @@ class GeminiAdapter:
             )
         try:
             import google.generativeai as genai  # noqa: F401
+
             genai.configure(api_key=api_key)
             self._genai = genai
         except ImportError as exc:

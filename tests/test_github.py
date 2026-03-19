@@ -8,9 +8,7 @@ from autodev.github.issue_reader import IssueReader
 class TestIssueReader:
     def test_url_parsing_valid(self):
         reader = IssueReader()
-        owner, repo, number = reader.parse_url(
-            "https://github.com/octocat/Hello-World/issues/42"
-        )
+        owner, repo, number = reader.parse_url("https://github.com/octocat/Hello-World/issues/42")
         assert owner == "octocat"
         assert repo == "Hello-World"
         assert number == 42
@@ -37,6 +35,7 @@ class TestPRCreator:
     def test_no_token_raises(self, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         from autodev.github.pr_creator import PRCreator
+
         creator = PRCreator()
         with pytest.raises(EnvironmentError, match="GITHUB_TOKEN"):
             creator.create(
