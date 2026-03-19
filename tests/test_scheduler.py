@@ -166,9 +166,9 @@ def test_retryable_failure_uses_bounded_backoff_and_becomes_runnable_when_due(tm
     assert updated.next_eligible_at == now + timedelta(seconds=30)
     assert updated.retry_history[-1].retry_scheduled is True
     assert scheduler.get_runnable_tasks(now=now) == []
-    assert [task.task_id for task in scheduler.get_runnable_tasks(now=now + timedelta(seconds=30))] == [
-        "AD-008__validate"
-    ]
+    assert [
+        task.task_id for task in scheduler.get_runnable_tasks(now=now + timedelta(seconds=30))
+    ] == ["AD-008__validate"]
 
 
 def test_exhausted_retryable_failure_becomes_blocked(tmp_path):
@@ -222,9 +222,9 @@ def test_non_retryable_failure_remains_blocked_until_reset(tmp_path):
 
     assert reset.status == TaskStatus.PENDING
     assert reset.last_failure is None
-    assert [task.task_id for task in scheduler.get_runnable_tasks(now=now + timedelta(minutes=6))] == [
-        "AD-008__validate"
-    ]
+    assert [
+        task.task_id for task in scheduler.get_runnable_tasks(now=now + timedelta(minutes=6))
+    ] == ["AD-008__validate"]
 
 
 def test_retry_history_is_persisted_in_scheduler_state(tmp_path):

@@ -53,8 +53,7 @@ class IssueReader:
         token = os.environ.get("GITHUB_TOKEN")
         if not token:
             raise EnvironmentError(
-                "GITHUB_TOKEN environment variable is not set. "
-                "Please set it to read GitHub issues."
+                "GITHUB_TOKEN environment variable is not set. Please set it to read GitHub issues."
             )
 
         from github import Github  # PyGithub

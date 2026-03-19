@@ -59,8 +59,7 @@ def init() -> None:
 
     console.print(
         Panel(
-            "[bold green]AutoDev initialized![/bold green]\n"
-            f"Config directory: {_CONFIG_DIR}",
+            f"[bold green]AutoDev initialized![/bold green]\nConfig directory: {_CONFIG_DIR}",
             title="autodev init",
         )
     )
@@ -86,7 +85,7 @@ def run(
             console.print(f"\n[green]PR:[/green] {context.metadata['pr_url']}")
     except Exception as exc:
         console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command(name="fix-ci")

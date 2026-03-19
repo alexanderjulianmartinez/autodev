@@ -97,7 +97,9 @@ class BacklogService:
                 "priority": current.priority if priority is None else priority,
                 "dependencies": dependency_list,
                 "acceptance_criteria": (
-                    current.acceptance_criteria if acceptance_criteria is None else list(acceptance_criteria)
+                    current.acceptance_criteria
+                    if acceptance_criteria is None
+                    else list(acceptance_criteria)
                 ),
                 "labels": current.labels if labels is None else list(labels),
                 "metadata": current.metadata if metadata is None else dict(metadata),
@@ -128,7 +130,9 @@ class BacklogService:
                     f"Backlog item {item_id!r} has unknown dependency {dependency_id!r}"
                 )
 
-        graph = {item.item_id: list(item.dependencies) for item in self.state_store.list_backlog_items()}
+        graph = {
+            item.item_id: list(item.dependencies) for item in self.state_store.list_backlog_items()
+        }
         graph[item_id] = dependency_list
         self._assert_no_cycles(graph)
 

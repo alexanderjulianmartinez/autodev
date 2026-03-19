@@ -251,7 +251,9 @@ class FileStateStore:
 
     def _write_json(self, path: Path, payload: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_path_str = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        fd, temp_path_str = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
         temp_path = Path(temp_path_str)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

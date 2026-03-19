@@ -17,11 +17,10 @@ class AnthropicAdapter:
             )
         try:
             import anthropic  # noqa: F401
+
             self._client = anthropic.Anthropic(api_key=api_key)
         except ImportError as exc:
-            raise ImportError(
-                "anthropic package is required: pip install anthropic"
-            ) from exc
+            raise ImportError("anthropic package is required: pip install anthropic") from exc
 
     def generate(self, prompt: str, context: str = "", model: str = "claude-sonnet-4-5") -> str:
         system = context if context else "You are a helpful software engineering assistant."

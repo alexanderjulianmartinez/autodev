@@ -1,7 +1,5 @@
 """Tests for model components."""
 
-import os
-
 import pytest
 
 from autodev.models.adapters.local_adapter import LocalAdapter
@@ -30,6 +28,7 @@ class TestOpenAIAdapter:
     def test_missing_api_key_raises(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         from autodev.models.adapters.openai_adapter import OpenAIAdapter
+
         with pytest.raises(EnvironmentError, match="OPENAI_API_KEY"):
             OpenAIAdapter()
 
@@ -38,6 +37,7 @@ class TestAnthropicAdapter:
     def test_missing_api_key_raises(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         from autodev.models.adapters.anthropic_adapter import AnthropicAdapter
+
         with pytest.raises(EnvironmentError, match="ANTHROPIC_API_KEY"):
             AnthropicAdapter()
 
@@ -46,6 +46,7 @@ class TestGeminiAdapter:
     def test_missing_api_key_raises(self, monkeypatch):
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
         from autodev.models.adapters.gemini_adapter import GeminiAdapter
+
         with pytest.raises(EnvironmentError, match="GOOGLE_API_KEY"):
             GeminiAdapter()
 

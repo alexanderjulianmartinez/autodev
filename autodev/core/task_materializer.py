@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Optional
 
 from autodev.core.backlog_service import BacklogService
 from autodev.core.schemas import BacklogItem, BacklogStatus, PhaseName, PriorityLevel, TaskRecord
@@ -125,7 +125,9 @@ class TaskMaterializer:
 
     def _has_missing_phase_tasks(self, item_id: str) -> bool:
         existing_task_ids = {
-            task.task_id for task in self.state_store.list_tasks() if task.backlog_item_id == item_id
+            task.task_id
+            for task in self.state_store.list_tasks()
+            if task.backlog_item_id == item_id
         }
         expected_task_ids = {self.make_task_id(item_id, phase) for phase in self.phase_sequence}
         return not expected_task_ids.issubset(existing_task_ids)

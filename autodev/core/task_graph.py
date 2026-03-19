@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -70,7 +70,7 @@ class TaskGraph:
         Raises ValueError if a cycle is detected.
         """
         in_degree: dict[str, int] = {n: 0 for n in self._nodes}
-        for src, successors in self._edges.items():
+        for _src, successors in self._edges.items():
             for dst in successors:
                 in_degree[dst] += 1
 
@@ -133,7 +133,9 @@ class TaskScheduler:
         PriorityLevel.LOW.value: 3,
     }
 
-    def __init__(self, tasks: list[TaskRecord], state_store: Optional[FileStateStore] = None) -> None:
+    def __init__(
+        self, tasks: list[TaskRecord], state_store: Optional[FileStateStore] = None
+    ) -> None:
         self._tasks = list(tasks)
         self._state_store = state_store
 
@@ -183,7 +185,10 @@ class TaskScheduler:
                 continue
             if task.next_eligible_at is not None and task.next_eligible_at > current_time:
                 continue
-            if all(task_map[dependency_id].status == TaskStatus.COMPLETED for dependency_id in task.dependencies):
+            if all(
+                task_map[dependency_id].status == TaskStatus.COMPLETED
+                for dependency_id in task.dependencies
+            ):
                 runnable.append(task)
 
         return sorted(runnable, key=self._sort_key)
@@ -282,7 +287,9 @@ class TaskScheduler:
         priority_value = str(task.metadata.get("backlog_priority", PriorityLevel.MEDIUM.value))
         phase_value = task.phase.value if isinstance(task.phase, PhaseName) else str(task.phase)
         return (
-            self._PRIORITY_ORDER.get(priority_value, self._PRIORITY_ORDER[PriorityLevel.MEDIUM.value]),
+            self._PRIORITY_ORDER.get(
+                priority_value, self._PRIORITY_ORDER[PriorityLevel.MEDIUM.value]
+            ),
             self._PHASE_ORDER.get(phase_value, 99),
             task.created_at,
             task.task_id,
@@ -321,7 +328,9 @@ class TaskScheduler:
                     "last_failure_class": (
                         task.last_failure.failure_class.value if task.last_failure else None
                     ),
-                    "retry_history": [entry.model_dump(mode="json") for entry in task.retry_history],
+                    "retry_history": [
+                        entry.model_dump(mode="json") for entry in task.retry_history
+                    ],
                 }
                 for task in self._tasks
             ],

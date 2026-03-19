@@ -15,7 +15,6 @@ from autodev.core.schemas import (
     TaskRecord,
     TaskResult,
     TaskStatus,
-    ValidationStatus,
 )
 from autodev.core.state_store import FileStateStore
 
@@ -81,7 +80,9 @@ def test_run_metadata_and_review_result_persist_under_run_directory(tmp_path):
     review_path = store.save_review_result(run.run_id, review)
 
     assert run_path == tmp_path / "state" / "runs" / "run-004" / "metadata.json"
-    assert review_path == tmp_path / "state" / "runs" / "run-004" / "reviews" / "AD-004__review.json"
+    assert (
+        review_path == tmp_path / "state" / "runs" / "run-004" / "reviews" / "AD-004__review.json"
+    )
     assert store.load_run("run-004") == run
     assert store.load_review_result("run-004", "AD-004__review") == review
     assert store.list_runs() == [run]

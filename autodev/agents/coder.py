@@ -34,22 +34,17 @@ class CoderAgent(Agent):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _apply_plan_stub(
-        self, context: AgentContext, existing: list[str]
-    ) -> list[str]:
+    def _apply_plan_stub(self, context: AgentContext, existing: list[str]) -> list[str]:
         """Record planned file targets without actually writing."""
         targets: list[str] = list(existing)
         for step in context.plan:
-            lower = step.lower()
             # Heuristic: pick out file references from the plan text
             for token in step.split():
                 if "." in token and "/" not in token and token not in targets:
                     targets.append(token.strip(".,;:"))
         return targets
 
-    def _apply_plan_with_model(
-        self, context: AgentContext, existing: list[str]
-    ) -> list[str]:
+    def _apply_plan_with_model(self, context: AgentContext, existing: list[str]) -> list[str]:
         """Use model to generate file content, then write to disk."""
         targets: list[str] = list(existing)
         for step in context.plan:

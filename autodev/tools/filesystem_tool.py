@@ -67,7 +67,5 @@ class FilesystemTool(Tool):
     def _resolve(self, path: str) -> Path:
         target = Path(path).resolve()
         if self.base_path is not None and not str(target).startswith(str(self.base_path)):
-            raise ValueError(
-                f"Path {path!r} is outside the allowed base path {self.base_path!r}"
-            )
+            raise ValueError(f"Path {path!r} is outside the allowed base path {self.base_path!r}")
         return target

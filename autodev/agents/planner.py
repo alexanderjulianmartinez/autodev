@@ -44,7 +44,7 @@ class PlannerAgent(Agent):
         )
 
     def _parse_plan(self, response: str) -> list[str]:
-        lines = [l.strip() for l in response.splitlines() if l.strip()]
+        lines = [line.strip() for line in response.splitlines() if line.strip()]
         return lines if lines else self._default_plan(AgentContext())
 
     def _default_plan(self, context: AgentContext) -> list[str]:

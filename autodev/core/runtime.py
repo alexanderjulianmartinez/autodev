@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
 import logging
 import os
 import tempfile
+from enum import Enum
 from typing import Any
 
 from rich.console import Console
@@ -89,7 +89,6 @@ class Orchestrator:
             transient=True,
             console=console,
         ) as progress:
-
             # 1. Read issue
             task = progress.add_task("Analyzing issue...", total=None)
             context = self._read_issue(context)
@@ -108,13 +107,21 @@ class Orchestrator:
 
             # 4. Implement → Validate loop
             for iteration in range(self.supervisor.max_iterations):
-                progress.update(task, description=f"Implementing changes (iteration {iteration + 1})...")
+                progress.update(
+                    task, description=f"Implementing changes (iteration {iteration + 1})..."
+                )
                 context = self._implement(context)
-                self._stage_outputs["implement"] = {"status": "completed", "iteration": iteration + 1}
+                self._stage_outputs["implement"] = {
+                    "status": "completed",
+                    "iteration": iteration + 1,
+                }
 
                 progress.update(task, description="Running validation...")
                 context = self._validate(context)
-                self._stage_outputs["validate"] = {"status": "completed", "iteration": iteration + 1}
+                self._stage_outputs["validate"] = {
+                    "status": "completed",
+                    "iteration": iteration + 1,
+                }
 
                 if "PASSED" in context.validation_results or context.validation_results == "":
                     break

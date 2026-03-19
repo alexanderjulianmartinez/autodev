@@ -1,79 +1,118 @@
 # AutoDev
 
-AutoDev is an open-source autonomous development runtime for turning a change request into a durable, reviewable execution flow.
+AutoDev is an open-source, model-agnostic autonomous engineering runtime.
 
-The core model is:
+It is designed for people who want a coding agent runtime that is structured, inspectable, and safe by default rather than a loose chat loop. The project is currently focused on building the durable local runtime foundations: backlog items, task materialization, deterministic scheduling, retry handling, and persistent execution state.
+
+## Who this is for
+
+- contributors building the runtime itself
+- developers exploring autonomous software delivery workflows
+- operators who want inspectable runs, artifacts, and retry history
+
+## What AutoDev does
+
+AutoDev turns a change request into a bounded execution flow:
 
 `request -> plan -> implement -> validate -> review -> approve/merge -> record state`
 
-Instead of treating autonomous coding as an open-ended chat loop, AutoDev treats it as a deterministic pipeline with durable state, isolated workspaces, targeted validation, and explicit review gates.
+The runtime is being built around a few core ideas:
 
-## What AutoDev Optimizes For
+- durable backlog items instead of one-off prompts
+- deterministic task scheduling instead of free-form loops
+- explicit validation and review phases
+- persisted run/task state for resume and auditability
+- safe execution primitives that can later support snapshots and isolated workspaces
 
-- durable backlog items instead of ephemeral prompts
-- deterministic scheduling instead of free-form agent loops
-- isolated execution instead of risky in-place mutation
-- targeted validation instead of always running the whole repository
-- structured review decisions instead of unstructured summaries
-- resumable state instead of losing progress between runs
+## Current status
 
-## Core Runtime Shape
+This repository is still early and documentation-first, but the runtime foundation work is underway.
 
-The proposed runtime is built from a small set of reusable subsystems:
+Implemented so far:
 
-- backlog service
-- task materializer
-- deterministic scheduler
-- phase registry
-- workspace manager
-- validation engine
-- review engine
-- state store
-- operator-facing CLI and artifacts
+- durable Pydantic schemas for backlog, tasks, runs, validation, review, and retry history
+- file-backed state storage with atomic JSON writes
+- backlog service with dependency validation
+- task materialization for `plan -> implement -> validate -> review`
+- deterministic scheduler with bounded retry/backoff handling
+- local developer automation via `Makefile`, `pre-commit`, Ruff, and GitHub Actions
 
-The default coding pipeline is:
+Still in progress:
 
-1. `intake`: normalize a user request, issue, or PR comment into a backlog item
-2. `plan`: inspect repository context and define a bounded implementation plan
-3. `implement`: apply the smallest viable code and documentation changes
-4. `validate`: run targeted checks inferred from changed files or explicit commands
-5. `review`: evaluate acceptance criteria, diff quality, and policy gates
-6. `promote`: request approval, merge, or emit a patch bundle when enabled
+- workspace isolation and snapshots
+- formal phase registry and execution contracts
+- targeted validation engine
+- structured review and promotion workflows
 
-## MVP Priorities
+## Quick start
 
-The smallest useful AutoDev implementation should deliver these pieces in order:
+### Requirements
 
-1. durable backlog item schema
-2. task graph and deterministic scheduler
-3. phase registry for `plan -> implement -> validate -> review`
-4. per-run workspace isolation with snapshots
-5. targeted validation inference from changed files
-6. failure classification with bounded retries
-7. structured review decision output
-8. basic scheduler state for repeated runs
+- Python 3.10+
+- Git
 
-## Principles
+### Install
 
-- model-agnostic runtime with pluggable handlers
-- local-first execution with optional GitHub and CI integration
-- deterministic, inspectable state transitions
-- minimal reviewable changes per backlog item
-- safe promotion only after validation and review gates pass
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .[dev]
+```
 
-## Documents
+### Initialize local config
 
-- Full system design: [system_design.md](system_design.md)
+```bash
+autodev init
+```
 
-## Current Status
+### Useful commands
 
-This repository is currently documentation-first. The design doc captures the runtime architecture to implement next and distills the reusable execution model from AlphaDesk into an AutoDev-friendly shape.
+```bash
+make lint
+make test
+make pre-commit
+```
 
-## Near-Term Build Plan
+Or directly:
 
-- define stable backlog, task, run, and review schemas
-- implement the task materializer and deterministic scheduler
-- add phase handler contracts for planner, implementer, validator, and reviewer
-- add workspace isolation with snapshots and diff capture
-- add targeted validation selection and persisted reports
+```bash
+python -m pytest
+python -m ruff check .
+python -m pre_commit run --all-files
+```
 
+## Project layout
+
+- `autodev/core`: runtime foundations such as schemas, state store, backlog service, materializer, and scheduler
+- `autodev/agents`: current planner/coder/reviewer/debugger scaffolding
+- `autodev/tools`: filesystem, shell, git, and validation helpers
+- `autodev/github`: issue intake, repo clone, and PR helpers
+- `tests`: focused unit tests for the runtime foundation layers
+- `docs`: design documents, backlog tracking, and technical specs
+
+## Documentation
+
+- System design: [system_design.md](system_design.md)
+- Architecture inventory: [docs/architecture_inventory.md](docs/architecture_inventory.md)
+- Implementation backlog: [backlog.md](backlog.md)
+- Runtime tech spec v0.1: [docs/tech_spec_v01.md](docs/tech_spec_v01.md)
+- Runtime expansion spec v0.2: [docs/tech_spec_v02.md](docs/tech_spec_v02.md)
+
+## Contributing
+
+Contributions are welcome, especially in the current MVP path:
+
+- workspace isolation and snapshotting
+- validation engine improvements
+- phase registry and handler contracts
+- review/promotion workflows
+- CLI productization
+
+Before opening a PR:
+
+```bash
+make ci
+```
+
+If you are picking up runtime work, the best place to start is the backlog and architecture docs, then the tests around the relevant subsystem.
