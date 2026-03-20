@@ -210,6 +210,21 @@ def test_capture_implementation_artifacts_tracks_renames_via_porcelain_status(tm
     ]
 
 
+def test_parse_porcelain_status_uses_destination_as_path_for_rename_records(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+
+    parsed = manager._parse_porcelain_status("R  new name.txt\0old name.txt\0")
+
+    assert parsed == [
+        {
+            "path": "new name.txt",
+            "previous_path": "old name.txt",
+            "status": "R",
+        }
+    ]
+
+
 def test_capture_implementation_artifacts_surfaces_non_git_failure(tmp_path):
     store = FileStateStore(str(tmp_path / "state"))
     manager = WorkspaceManager(store)
