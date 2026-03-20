@@ -174,3 +174,23 @@ def test_run_dir_accepts_safe_run_id(tmp_path):
     run_dir = store.run_dir("run-011_safe.case")
 
     assert run_dir == tmp_path / "state" / "runs" / "run-011_safe.case"
+
+
+def test_report_name_rejects_traversal_on_save_load_and_append(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.save_report("../escape", {"status": "bad"})
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.load_report("../escape")
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.append_report_entry("../escape", {"status": "bad"})
+
+
+def test_report_name_rejects_path_separator(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.save_report("nested/report", {"status": "bad"})

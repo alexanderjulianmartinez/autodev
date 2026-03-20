@@ -110,7 +110,8 @@ class FileStateStore:
         return review_dir / f"{task_id}.json"
 
     def _report_path(self, report_name: str) -> Path:
-        return self.reports_dir / f"{report_name}.json"
+        safe_report_name = self._validate_identifier(report_name, kind="report")
+        return self.reports_dir / f"{safe_report_name}.json"
 
     def _scheduler_state_path(self) -> Path:
         return self.scheduler_dir / "state.json"
