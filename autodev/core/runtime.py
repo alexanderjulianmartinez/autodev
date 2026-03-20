@@ -97,7 +97,6 @@ class Orchestrator:
 
         context = AgentContext(issue_url=issue_url)
         final_run_status: RunStatus | None = None
-        pipeline_error: Exception | None = None
 
         try:
             with Progress(
@@ -170,10 +169,9 @@ class Orchestrator:
             final_run_status = RunStatus.COMPLETED
             console.print(Panel("[bold green]Pipeline complete![/bold green]", expand=False))
             return context
-        except Exception as exc:
+        except Exception:
             self._state = PipelineState.FAILED
             final_run_status = RunStatus.FAILED
-            pipeline_error = exc
             logger.exception("Pipeline failed while processing %s", issue_url)
             raise
         finally:
@@ -185,8 +183,9 @@ class Orchestrator:
                         status=final_run_status,
                         quarantine_on_failure=final_run_status == RunStatus.FAILED,
                     )
-                except Exception:
+                except Exception as finalize_error:
                     logger.exception("Failed to finalize run %s", run_id)
+                    finalize_error_message = str(finalize_error)
                     try:
                         self.state_store.update_run(
                             run_id,
@@ -194,7 +193,7 @@ class Orchestrator:
                                 update={
                                     "metadata": {
                                         **current.metadata,
-                                        "finalize_run_error": str(pipeline_error),
+                                        "finalize_run_error": finalize_error_message,
                                         "finalize_run_error_at": utc_now().isoformat(),
                                     }
                                 }
