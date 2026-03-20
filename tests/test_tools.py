@@ -1,6 +1,7 @@
 """Tests for tool components."""
 
 import os
+import sys
 import tempfile
 from unittest.mock import patch
 
@@ -227,3 +228,21 @@ class TestGitTool:
         with patch("autodev.tools.git_tool.subprocess.run", side_effect=FileNotFoundError()):
             with pytest.raises(RuntimeError, match="git executable is not available"):
                 tool._run_git_command(["status"])
+
+    def test_clone_logs_sanitized_repo_url(self, caplog):
+        tool = GitTool()
+        repo_url = "https://ghp_secret-token@github.com/octocat/Hello-World.git"
+
+        class FakeRepo:
+            @staticmethod
+            def clone_from(_repo_url, _dest_path):
+                return None
+
+        fake_git_module = type("FakeGitModule", (), {"Repo": FakeRepo})()
+
+        with patch.dict(sys.modules, {"git": fake_git_module}):
+            with caplog.at_level("INFO"):
+                tool.clone(repo_url, "/tmp/hello-world")
+
+        assert "ghp_secret-token" not in caplog.text
+        assert "github.com/octocat/Hello-World.git" in caplog.text

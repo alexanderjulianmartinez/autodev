@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from typing import Any
+from urllib.parse import urlparse
 
 from autodev.tools.base import Tool
 
@@ -52,7 +53,7 @@ class GitTool(Tool):
 
     def clone(self, repo_url: str, dest_path: str) -> str:
         """Clone *repo_url* into *dest_path* and return the destination."""
-        logger.info("Cloning %s → %s", repo_url, dest_path)
+        logger.info("Cloning %s → %s", self._sanitize_repo_url(repo_url), dest_path)
         try:
             import git  # GitPython
 
@@ -153,6 +154,16 @@ class GitTool(Tool):
         except ModuleNotFoundError:
             self._run_git_command(["-C", repo_path, "push", "origin", branch_name])
         logger.info("Pushed branch %r", branch_name)
+
+    def _sanitize_repo_url(self, repo_url: str) -> str:
+        parsed = urlparse(repo_url)
+        if parsed.scheme and parsed.netloc:
+            host = parsed.hostname or parsed.netloc.rsplit("@", maxsplit=1)[-1]
+            path = parsed.path or ""
+            return f"{host}{path}"
+        if "@" in repo_url and ":" in repo_url:
+            return repo_url.rsplit(":", maxsplit=1)[0].rsplit("@", maxsplit=1)[-1]
+        return repo_url
 
     def _run_git_command(self, args: list[str]) -> None:
         try:
