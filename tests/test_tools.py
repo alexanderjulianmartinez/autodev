@@ -1,6 +1,7 @@
 """Tests for tool components."""
 
 import os
+import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
@@ -229,6 +230,30 @@ class TestGitTool:
             with pytest.raises(RuntimeError, match="git executable is not available"):
                 tool._run_git_command(["status"])
 
+    def test_run_git_command_redacts_credentials_from_git_error_output(self):
+        tool = GitTool()
+        git_error = (
+            "fatal: could not read Username for "
+            "'https://ghp_secret-token@github.com/octocat/Hello-World.git': auth failed"
+        )
+
+        with patch(
+            "autodev.tools.git_tool.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "clone"],
+                returncode=128,
+                stdout="",
+                stderr=git_error,
+            ),
+        ):
+            with pytest.raises(RuntimeError) as exc_info:
+                tool._run_git_command(
+                    ["clone", "https://ghp_secret-token@github.com/test/repo.git"]
+                )
+
+        assert "ghp_secret-token" not in str(exc_info.value)
+        assert "https://***@github.com/octocat/Hello-World.git" in str(exc_info.value)
+
     def test_clone_logs_sanitized_repo_url(self, caplog):
         tool = GitTool()
         repo_url = "https://ghp_secret-token@github.com/octocat/Hello-World.git"
@@ -246,3 +271,24 @@ class TestGitTool:
 
         assert "ghp_secret-token" not in caplog.text
         assert "github.com/octocat/Hello-World.git" in caplog.text
+
+    def test_clone_redacts_credentials_from_gitpython_error(self):
+        tool = GitTool()
+        repo_url = "https://ghp_secret-token@github.com/octocat/Hello-World.git"
+
+        class FakeRepo:
+            @staticmethod
+            def clone_from(_repo_url, _dest_path):
+                raise Exception(
+                    "fatal: could not read Username for "
+                    "'https://ghp_secret-token@github.com/octocat/Hello-World.git': auth failed"
+                )
+
+        fake_git_module = type("FakeGitModule", (), {"Repo": FakeRepo})()
+
+        with patch.dict(sys.modules, {"git": fake_git_module}):
+            with pytest.raises(RuntimeError) as exc_info:
+                tool.clone(repo_url, "/tmp/hello-world")
+
+        assert "ghp_secret-token" not in str(exc_info.value)
+        assert "https://***@github.com/octocat/Hello-World.git" in str(exc_info.value)

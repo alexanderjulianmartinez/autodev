@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from typing import Any
 from urllib.parse import urlparse
@@ -10,6 +11,13 @@ from urllib.parse import urlparse
 from autodev.tools.base import Tool
 
 logger = logging.getLogger(__name__)
+GIT_URL_CREDENTIALS_PATTERN = re.compile(r"(?P<scheme>https?://)(?P<userinfo>[^/\s@]+)@")
+
+
+def sanitize_git_output(text: str) -> str:
+    if not text:
+        return text
+    return GIT_URL_CREDENTIALS_PATTERN.sub(r"\g<scheme>***@", text)
 
 
 class GitTool(Tool):
@@ -56,10 +64,17 @@ class GitTool(Tool):
         logger.info("Cloning %s → %s", self._sanitize_repo_url(repo_url), dest_path)
         try:
             import git  # GitPython
-
-            git.Repo.clone_from(repo_url, dest_path)
         except ModuleNotFoundError:
             self._run_git_command(["clone", repo_url, dest_path])
+            return dest_path
+
+        try:
+            git.Repo.clone_from(repo_url, dest_path)
+        except Exception as exc:
+            sanitized_error = sanitize_git_output(str(exc))
+            if sanitized_error != str(exc):
+                raise RuntimeError(sanitized_error) from exc
+            raise
         return dest_path
 
     def create_branch(self, repo_path: str, branch_name: str) -> None:
@@ -176,4 +191,7 @@ class GitTool(Tool):
         except FileNotFoundError as exc:
             raise RuntimeError("git executable is not available") from exc
         if completed.returncode != 0:
-            raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "git failed")
+            error = sanitize_git_output(
+                completed.stderr.strip() or completed.stdout.strip() or "git failed"
+            )
+            raise RuntimeError(error)

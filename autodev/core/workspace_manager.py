@@ -15,7 +15,7 @@ from uuid import uuid4
 from autodev.core.schemas import IsolationMode, RunMetadata, RunStatus, utc_now
 from autodev.core.state_store import FileStateStore
 from autodev.github.repo_cloner import RepoCloner
-from autodev.tools.git_tool import GitTool
+from autodev.tools.git_tool import GitTool, sanitize_git_output
 
 logger = logging.getLogger(__name__)
 
@@ -454,20 +454,24 @@ class WorkspaceManager:
         destination: Path,
         branch_name: str,
     ) -> None:
-        completed = subprocess.run(
-            [
-                "git",
-                "clone",
-                "--no-hardlinks",
-                "--branch",
-                branch_name,
-                str(source_repo),
-                str(destination),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--no-hardlinks",
+                    "--branch",
+                    branch_name,
+                    str(source_repo),
+                    str(destination),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("git executable is not available") from exc
+
         if completed.returncode != 0:
             error = completed.stderr.strip() or completed.stdout.strip() or "git clone failed"
             raise RuntimeError(f"Failed to create quarantined repository snapshot: {error}")
@@ -613,14 +617,16 @@ class WorkspaceManager:
             return False, "", error
 
         if completed.returncode != 0:
-            error = completed.stderr.strip() or completed.stdout.strip() or "git command failed"
+            sanitized_stdout = sanitize_git_output(completed.stdout)
+            sanitized_stderr = sanitize_git_output(completed.stderr)
+            error = sanitized_stderr.strip() or sanitized_stdout.strip() or "git command failed"
             logger.warning(
                 "Git command failed in %s: git %s (%s)",
                 workspace,
-                " ".join(args),
+                sanitize_git_output(" ".join(args)),
                 error,
             )
-            return False, completed.stdout, error
+            return False, sanitized_stdout, error
         return True, completed.stdout, None
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:

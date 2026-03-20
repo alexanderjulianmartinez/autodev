@@ -113,6 +113,52 @@ def test_prepare_local_repository_creates_worktree_isolation(tmp_path):
     assert run_copy.metadata["isolation_branch"].startswith("autodev/ad-010-")
 
 
+def test_clone_standalone_repository_raises_clear_error_when_git_missing(tmp_path, monkeypatch):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    source_repo = tmp_path / "source-repo"
+    destination = tmp_path / "destination"
+
+    def missing_git(*args, **kwargs):
+        raise FileNotFoundError()
+
+    monkeypatch.setattr(subprocess, "run", missing_git)
+
+    with pytest.raises(RuntimeError, match="git executable is not available"):
+        manager._clone_standalone_repository(source_repo, destination, "autodev/test")
+
+
+def test_run_git_command_redacts_credentials_from_git_error_output(tmp_path, monkeypatch):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / ".git").mkdir()
+
+    git_error = (
+        "fatal: could not read Username for "
+        "'https://ghp_secret-token@github.com/octocat/Hello-World.git': auth failed"
+    )
+
+    def failed_git_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=["git", "status"],
+            returncode=128,
+            stdout="",
+            stderr=git_error,
+        )
+
+    monkeypatch.setattr(subprocess, "run", failed_git_run)
+
+    success, stdout, error = manager._run_git_command(workspace, ["fetch"])
+
+    assert not success
+    assert stdout == ""
+    assert error is not None
+    assert "ghp_secret-token" not in error
+    assert "https://***@github.com/octocat/Hello-World.git" in error
+
+
 def test_snapshot_file_copies_pre_edit_contents(tmp_path):
     store = FileStateStore(str(tmp_path / "state"))
     manager = WorkspaceManager(store)
