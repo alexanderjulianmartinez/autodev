@@ -88,6 +88,19 @@ class TestFilesystemTool:
             with pytest.raises(ValueError, match="outside"):
                 tool.read_file("/etc/passwd")
 
+    def test_prefix_matching_path_outside_base_path_is_rejected(self, tmp_path):
+        base_path = tmp_path / "base"
+        base_path.mkdir(parents=True)
+        sibling_path = tmp_path / "base-evil"
+        sibling_path.mkdir(parents=True)
+        target = sibling_path / "outside.txt"
+        target.write_text("escape", encoding="utf-8")
+
+        tool = FilesystemTool(base_path=str(base_path))
+
+        with pytest.raises(ValueError, match="outside"):
+            tool.write_file(str(target), "still blocked")
+
     def test_blocked_file_write_is_rejected_and_persisted(self, tmp_path):
         store = FileStateStore(str(tmp_path / "state"))
         supervisor = Supervisor(state_store=store)

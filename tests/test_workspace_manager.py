@@ -204,5 +204,54 @@ def test_finalize_run_can_quarantine_failure_and_teardown_worktree(tmp_path):
     assert finalized.status == RunStatus.FAILED
     assert finalized.completed_at is not None
     assert quarantined_path.exists()
+    assert (quarantined_path / ".git").is_dir()
     assert (quarantined_path / "README.md").read_text(encoding="utf-8").endswith("Failure case\n")
     assert not workspace.exists()
+
+    status_output = subprocess.run(
+        ["git", "-C", str(quarantined_path), "status", "--short"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    branch_name = subprocess.run(
+        ["git", "-C", str(quarantined_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert "README.md" in status_output
+    assert branch_name == store.load_run(run.run_id).metadata["isolation_branch"]
+
+
+def test_quarantine_worktree_preserves_untracked_files_after_teardown(tmp_path):
+    source_repo = tmp_path / "source-repo"
+    initialize_git_repo(source_repo)
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run(
+        "AD-011",
+        run_id="run-011-worktree-quarantine",
+        isolation_mode=IsolationMode.WORKTREE,
+    )
+    workspace = manager.prepare_local_repository(run.run_id, str(source_repo))
+    (workspace / "notes.txt").write_text("needs inspection\n", encoding="utf-8")
+
+    finalized = manager.finalize_run(
+        run.run_id,
+        status=RunStatus.FAILED,
+        quarantine_on_failure=True,
+    )
+    quarantined_path = Path(finalized.metadata["quarantined_workspace_path"])
+
+    status_output = subprocess.run(
+        ["git", "-C", str(quarantined_path), "status", "--short"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    assert "notes.txt" in status_output
+    assert (quarantined_path / "notes.txt").read_text(encoding="utf-8") == "needs inspection\n"

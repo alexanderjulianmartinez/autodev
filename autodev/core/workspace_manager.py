@@ -224,7 +224,10 @@ class WorkspaceManager:
         destination = self.quarantine_dir(run_id) / workspace.name
         if destination.exists():
             shutil.rmtree(destination)
-        shutil.copytree(workspace, destination)
+        if run.isolation_mode == IsolationMode.WORKTREE:
+            self._quarantine_worktree_repository(run, workspace, destination)
+        else:
+            shutil.copytree(workspace, destination)
         return destination
 
     def rollback_run(self, run_id: str) -> None:
@@ -365,6 +368,117 @@ class WorkspaceManager:
 
         if workspace.exists():
             shutil.rmtree(workspace, ignore_errors=True)
+
+    def _quarantine_worktree_repository(
+        self,
+        run: RunMetadata,
+        workspace: Path,
+        destination: Path,
+    ) -> None:
+        base_repo_path = run.metadata.get("base_repo_path")
+        branch_name = run.metadata.get("isolation_branch")
+        if not base_repo_path or not branch_name:
+            shutil.copytree(workspace, destination)
+            return
+
+        base_repo = Path(base_repo_path).expanduser().resolve()
+        if not base_repo.exists():
+            shutil.copytree(workspace, destination)
+            return
+
+        self._clone_standalone_repository(base_repo, destination, branch_name)
+        self._replace_repository_working_tree(destination, workspace)
+        self._copy_worktree_git_state(workspace, destination)
+
+    def _clone_standalone_repository(
+        self,
+        source_repo: Path,
+        destination: Path,
+        branch_name: str,
+    ) -> None:
+        completed = subprocess.run(
+            [
+                "git",
+                "clone",
+                "--no-hardlinks",
+                "--branch",
+                branch_name,
+                str(source_repo),
+                str(destination),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            error = completed.stderr.strip() or completed.stdout.strip() or "git clone failed"
+            raise RuntimeError(f"Failed to create quarantined repository snapshot: {error}")
+
+    def _replace_repository_working_tree(self, destination: Path, source_workspace: Path) -> None:
+        for child in destination.iterdir():
+            if child.name == ".git":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+
+        for child in source_workspace.iterdir():
+            if child.name == ".git":
+                continue
+            target = destination / child.name
+            if child.is_dir():
+                shutil.copytree(child, target)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(child, target)
+
+    def _copy_worktree_git_state(self, source_workspace: Path, destination: Path) -> None:
+        source_git_dir = self._resolve_worktree_git_dir(source_workspace)
+        if source_git_dir is None:
+            return
+
+        destination_git_dir = destination / ".git"
+        for file_name in [
+            "index",
+            "HEAD",
+            "MERGE_HEAD",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "ORIG_HEAD",
+            "MERGE_MSG",
+            "MERGE_MODE",
+            "AUTO_MERGE",
+        ]:
+            source_file = source_git_dir / file_name
+            if source_file.exists():
+                shutil.copy2(source_file, destination_git_dir / file_name)
+
+        for directory_name in ["rebase-apply", "rebase-merge", "sequencer"]:
+            source_directory = source_git_dir / directory_name
+            destination_directory = destination_git_dir / directory_name
+            if source_directory.exists():
+                if destination_directory.exists():
+                    shutil.rmtree(destination_directory)
+                shutil.copytree(source_directory, destination_directory)
+
+    def _resolve_worktree_git_dir(self, workspace: Path) -> Optional[Path]:
+        git_path = workspace / ".git"
+        if git_path.is_dir():
+            return git_path
+        if not git_path.is_file():
+            return None
+
+        content = git_path.read_text(encoding="utf-8").strip()
+        prefix = "gitdir:"
+        if not content.startswith(prefix):
+            return None
+
+        git_dir = content[len(prefix) :].strip()
+        resolved = Path(git_dir)
+        if not resolved.is_absolute():
+            resolved = (workspace / resolved).resolve()
+        return resolved
 
     def _run_git_command(self, workspace: Path, args: list[str]) -> tuple[bool, str, Optional[str]]:
         git_path = workspace / ".git"

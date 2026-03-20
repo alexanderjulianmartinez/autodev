@@ -148,6 +148,60 @@ class TestOrchestrator:
         assert entries[0]["allowed"] is True
         assert entries[0]["reason"] == "ok"
 
+    def test_clone_repo_threads_isolation_branch_into_context_metadata(self, tmp_path, monkeypatch):
+        orch = Orchestrator(work_dir=str(tmp_path), isolation_mode=IsolationMode.BRANCH)
+        context = AgentContext(
+            issue_url="https://github.com/octocat/Hello-World/issues/14",
+            metadata={"repo_full_name": "octocat/Hello-World"},
+        )
+        started = orch._start_run(context)
+        run_id = started.metadata["run_id"]
+        workspace_path = started.metadata["workspace_path"]
+
+        orch.state_store.update_run(
+            run_id,
+            lambda current: current.model_copy(
+                update={
+                    "metadata": {**current.metadata, "isolation_branch": "autodev/issue-14-run"}
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            orch.workspace_manager,
+            "clone_repo",
+            lambda _run_id, _repo_full_name: Path(workspace_path),
+        )
+
+        updated = orch._clone_repo(started)
+
+        assert updated.metadata["isolation_branch"] == "autodev/issue-14-run"
+
+    def test_open_pr_uses_isolation_branch_when_present(self, tmp_path, monkeypatch):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        created: dict[str, str] = {}
+
+        class StubPRCreator:
+            def create(self, repo_full_name, branch_name, title, body):
+                created["repo_full_name"] = repo_full_name
+                created["branch_name"] = branch_name
+                created["title"] = title
+                created["body"] = body
+                return "https://example.com/pr/1"
+
+        monkeypatch.setattr("autodev.core.runtime.PRCreator", StubPRCreator)
+        context = AgentContext(
+            metadata={
+                "repo_full_name": "octocat/Hello-World",
+                "issue_title": "Use branch",
+                "isolation_branch": "autodev/issue-14-run",
+            }
+        )
+
+        updated = orch._open_pr(context)
+
+        assert created["branch_name"] == "autodev/issue-14-run"
+        assert updated.metadata["pr_url"] == "https://example.com/pr/1"
+
     def test_run_pipeline_finalizes_completed_run(self, tmp_path, monkeypatch):
         orch = Orchestrator(work_dir=str(tmp_path), dry_run=True)
         finalized: dict[str, object] = {}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Iterable, TypeVar
@@ -20,6 +21,7 @@ from autodev.core.schemas import (
 )
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
+SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class FileStateStore:
@@ -58,6 +60,23 @@ class FileStateStore:
         directory.mkdir(parents=True, exist_ok=True)
         return directory
 
+    def _ensure_child_dir(self, parent: Path, child_name: str) -> Path:
+        directory = (parent / child_name).resolve()
+        try:
+            directory.relative_to(parent.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Invalid directory name: {child_name!r}") from exc
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def _validate_identifier(self, value: str, *, kind: str) -> str:
+        candidate = value.strip()
+        if not candidate or candidate in {".", ".."}:
+            raise ValueError(f"Invalid {kind} identifier: {value!r}")
+        if not SAFE_IDENTIFIER_PATTERN.fullmatch(candidate):
+            raise ValueError(f"Invalid {kind} identifier: {value!r}")
+        return candidate
+
     def _backlog_path(self, item_id: str) -> Path:
         return self.backlog_dir / f"{item_id}.json"
 
@@ -65,7 +84,8 @@ class FileStateStore:
         return self.tasks_dir / f"{task_id}.json"
 
     def _run_dir(self, run_id: str) -> Path:
-        return self._ensure_dir(f"runs/{run_id}")
+        safe_run_id = self._validate_identifier(run_id, kind="run")
+        return self._ensure_child_dir(self.runs_dir, safe_run_id)
 
     def run_dir(self, run_id: str) -> Path:
         """Return the durable directory for one run."""
