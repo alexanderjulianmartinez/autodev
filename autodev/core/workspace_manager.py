@@ -432,12 +432,12 @@ class WorkspaceManager:
         base_repo_path = run.metadata.get("base_repo_path")
         branch_name = run.metadata.get("isolation_branch")
         if not base_repo_path or not branch_name:
-            shutil.copytree(workspace, destination)
+            self._copy_tree_preserving_symlinks(workspace, destination)
             return
 
         base_repo = Path(base_repo_path).expanduser().resolve()
         if not base_repo.exists():
-            shutil.copytree(workspace, destination)
+            self._copy_tree_preserving_symlinks(workspace, destination)
             return
 
         self._clone_standalone_repository(base_repo, destination, branch_name)
@@ -473,6 +473,9 @@ class WorkspaceManager:
 
         for child in destination.iterdir():
             if child.name == ".git":
+                continue
+            if child.is_symlink():
+                child.unlink()
                 continue
             if child.is_dir():
                 shutil.rmtree(child)

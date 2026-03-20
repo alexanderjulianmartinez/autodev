@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 from rich.console import Console
 from rich.panel import Panel
@@ -30,6 +32,7 @@ from autodev.tools.test_runner import TestRunner
 
 logger = logging.getLogger(__name__)
 console = Console()
+SAFE_BACKLOG_TOKEN_PATTERN = re.compile(r"[^a-z0-9._-]+")
 
 
 class PipelineState(str, Enum):
@@ -325,8 +328,14 @@ class Orchestrator:
 
     @staticmethod
     def _derive_backlog_item_id(issue_url: str) -> str:
-        token = issue_url.rstrip("/").split("/")[-1] if issue_url else "adhoc"
-        return f"issue-{token or 'adhoc'}"
+        if not issue_url:
+            return "issue-adhoc"
+
+        parsed = urlparse(issue_url)
+        path_segments = [segment for segment in parsed.path.split("/") if segment]
+        raw_token = path_segments[-1] if path_segments else "adhoc"
+        normalized = SAFE_BACKLOG_TOKEN_PATTERN.sub("-", raw_token.lower()).strip("-._")
+        return f"issue-{normalized or 'adhoc'}"
 
 
 RuntimeOrchestrator = Orchestrator

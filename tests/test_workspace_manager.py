@@ -402,6 +402,82 @@ def test_quarantine_worktree_rejects_symlink_escaping_workspace(tmp_path):
     assert not quarantine_destination.exists()
 
 
+def test_quarantine_worktree_fallback_preserves_internal_symlinks(tmp_path):
+    source_repo = tmp_path / "source-repo"
+    initialize_git_repo(source_repo)
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run(
+        "AD-011",
+        run_id="run-011-worktree-fallback-symlink",
+        isolation_mode=IsolationMode.WORKTREE,
+    )
+    workspace = manager.prepare_local_repository(run.run_id, str(source_repo))
+    (workspace / "notes.txt").write_text("needs inspection\n", encoding="utf-8")
+    (workspace / "notes.link").symlink_to("notes.txt")
+    store.update_run(
+        run.run_id,
+        lambda current: current.model_copy(
+            update={"metadata": {k: v for k, v in current.metadata.items() if k != "base_repo_path"}}
+        ),
+    )
+
+    quarantined_path = manager.quarantine_run(run.run_id)
+
+    assert (quarantined_path / "notes.link").is_symlink()
+    assert os.readlink(quarantined_path / "notes.link") == "notes.txt"
+
+
+def test_quarantine_worktree_fallback_rejects_escaping_symlink(tmp_path):
+    source_repo = tmp_path / "source-repo"
+    initialize_git_repo(source_repo)
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("host data\n", encoding="utf-8")
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run(
+        "AD-011",
+        run_id="run-011-worktree-fallback-bad-symlink",
+        isolation_mode=IsolationMode.WORKTREE,
+    )
+    workspace = manager.prepare_local_repository(run.run_id, str(source_repo))
+    (workspace / "escape.link").symlink_to(outside_file)
+    store.update_run(
+        run.run_id,
+        lambda current: current.model_copy(
+            update={"metadata": {k: v for k, v in current.metadata.items() if k != "base_repo_path"}}
+        ),
+    )
+    quarantine_destination = manager.quarantine_dir(run.run_id) / workspace.name
+
+    with pytest.raises(ValueError, match="resolves outside source tree"):
+        manager.quarantine_run(run.run_id)
+
+    assert not quarantine_destination.exists()
+
+
+def test_replace_repository_working_tree_cleans_destination_directory_symlink(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    source_workspace = tmp_path / "source-workspace"
+    source_workspace.mkdir(parents=True)
+    (source_workspace / "notes.txt").write_text("updated\n", encoding="utf-8")
+
+    destination = tmp_path / "destination"
+    destination.mkdir(parents=True)
+    (destination / ".git").mkdir()
+    external_dir = tmp_path / "external-dir"
+    external_dir.mkdir(parents=True)
+    (destination / "linked-dir").symlink_to(external_dir, target_is_directory=True)
+
+    manager._replace_repository_working_tree(destination, source_workspace)
+
+    assert not (destination / "linked-dir").exists()
+    assert (destination / "notes.txt").read_text(encoding="utf-8") == "updated\n"
+
+
 def test_quarantine_snapshot_preserves_internal_symlinks(tmp_path):
     source = tmp_path / "source"
     source.mkdir(parents=True)

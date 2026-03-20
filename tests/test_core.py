@@ -148,6 +148,24 @@ class TestOrchestrator:
         assert entries[0]["allowed"] is True
         assert entries[0]["reason"] == "ok"
 
+    def test_derive_backlog_item_id_ignores_query_and_fragment(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+
+        backlog_item_id = orch._derive_backlog_item_id(
+            "https://github.com/octocat/Hello-World/issues/14?foo=bar#issuecomment-1"
+        )
+
+        assert backlog_item_id == "issue-14"
+
+    def test_derive_backlog_item_id_sanitizes_non_identifier_characters(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+
+        backlog_item_id = orch._derive_backlog_item_id(
+            "https://example.com/issues/Feature Request: Add CLI Support!"
+        )
+
+        assert backlog_item_id == "issue-feature-request-add-cli-support"
+
     def test_clone_repo_threads_isolation_branch_into_context_metadata(self, tmp_path, monkeypatch):
         orch = Orchestrator(work_dir=str(tmp_path), isolation_mode=IsolationMode.BRANCH)
         context = AgentContext(
