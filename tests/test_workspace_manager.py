@@ -7,6 +7,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from autodev.core.schemas import IsolationMode, RunStatus
 from autodev.core.state_store import FileStateStore
 from autodev.core.workspace_manager import WorkspaceManager
@@ -116,6 +118,18 @@ def test_snapshot_file_copies_pre_edit_contents(tmp_path):
         / "app.py"
     )
     assert snapshot.read_text(encoding="utf-8") == "print('before')\n"
+
+
+def test_snapshot_file_rejects_unsafe_label(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run("AD-009", run_id="run-009")
+    target = Path(run.workspace_path) / "src" / "app.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("print('before')\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid snapshot label"):
+        manager.snapshot_file(run.run_id, str(target), label="../escape")
 
 
 def test_capture_implementation_artifacts_persists_diff_and_changed_files(tmp_path):

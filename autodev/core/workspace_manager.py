@@ -245,7 +245,15 @@ class WorkspaceManager:
         except ValueError as exc:
             raise ValueError(f"File {target} is outside workspace for run {run_id!r}") from exc
 
-        destination = self.snapshots_dir(run_id) / label / relative_path
+        safe_label = self._validate_snapshot_label(label)
+        snapshots_root = self.snapshots_dir(run_id).resolve()
+        destination = (snapshots_root / safe_label / relative_path).resolve()
+        try:
+            destination.relative_to(snapshots_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Snapshot destination escaped snapshots directory for run {run_id!r}"
+            ) from exc
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(target, destination)
         return destination
@@ -329,6 +337,16 @@ class WorkspaceManager:
     def _branch_name(self, run: RunMetadata) -> str:
         normalized = run.backlog_item_id.lower().replace("/", "-").replace("_", "-")
         return f"autodev/{normalized}-{run.run_id}"
+
+    def _validate_snapshot_label(self, label: str) -> str:
+        candidate = label.strip()
+        if not candidate:
+            raise ValueError("Snapshot label must not be empty")
+        if candidate in {".", ".."}:
+            raise ValueError(f"Invalid snapshot label: {label!r}")
+        if "/" in candidate or "\\" in candidate or ".." in candidate:
+            raise ValueError(f"Invalid snapshot label: {label!r}")
+        return candidate
 
     def _ensure_empty_directory(self, path: Path, run_id: str) -> None:
         path.mkdir(parents=True, exist_ok=True)
