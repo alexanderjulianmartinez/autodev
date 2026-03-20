@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import PurePosixPath
 
 from autodev.core.schemas import utc_now
 from autodev.core.state_store import FileStateStore
@@ -21,13 +22,24 @@ BLOCKED_PATTERNS: list[str] = [
     "curl http",
 ]
 
-BLOCKED_WRITE_PATH_PATTERNS: list[str] = [
-    "/.git/",
-    "/.ssh/",
-    "/etc/",
-    "/bin/",
-    "/usr/bin/",
-    "/system/",
+BLOCKED_WRITE_PATH_PARTS: set[str] = {
+    ".git",
+    ".ssh",
+}
+
+BLOCKED_SYSTEM_WRITE_PREFIXES: list[str] = [
+    "/etc",
+    "/bin",
+    "/usr/bin",
+    "/system",
+]
+
+BLOCKED_WINDOWS_WRITE_PREFIXES: list[str] = [
+    "c:/windows",
+    "c:/windows/system32",
+    "c:/program files",
+    "c:/program files (x86)",
+    "c:/programdata/ssh",
 ]
 
 BLOCKED_WRITE_FILENAMES: set[str] = {
@@ -74,11 +86,19 @@ class Supervisor:
     def validate_file_write(self, path: str) -> tuple[bool, str]:
         """Return (is_safe, reason) for a prospective file write."""
         normalized = path.replace("\\", "/").lower()
-        for pattern in BLOCKED_WRITE_PATH_PATTERNS:
-            if pattern in normalized:
-                reason = f"Blocked file write path: '{pattern}'"
+        path_parts = {part for part in PurePosixPath(normalized).parts if part not in {"/", ""}}
+
+        for path_part in BLOCKED_WRITE_PATH_PARTS:
+            if path_part in path_parts:
+                reason = f"Blocked file write path part: '{path_part}'"
                 logger.warning("Supervisor rejected file write %r — %s", path, reason)
                 return False, reason
+
+        blocked_prefix = self._blocked_system_write_prefix(normalized)
+        if blocked_prefix is not None:
+            reason = f"Blocked file write path: '{blocked_prefix}'"
+            logger.warning("Supervisor rejected file write %r — %s", path, reason)
+            return False, reason
 
         filename = normalized.rsplit("/", maxsplit=1)[-1]
         if filename in BLOCKED_WRITE_FILENAMES:
@@ -87,6 +107,12 @@ class Supervisor:
             return False, reason
 
         return True, "ok"
+
+    def _blocked_system_write_prefix(self, normalized_path: str) -> str | None:
+        for prefix in [*BLOCKED_SYSTEM_WRITE_PREFIXES, *BLOCKED_WINDOWS_WRITE_PREFIXES]:
+            if normalized_path == prefix or normalized_path.startswith(f"{prefix}/"):
+                return prefix
+        return None
 
     def record_decision(
         self,

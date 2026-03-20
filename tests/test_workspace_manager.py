@@ -385,3 +385,42 @@ def test_quarantine_worktree_rejects_symlink_escaping_workspace(tmp_path):
         manager.quarantine_run(run.run_id)
 
     assert not quarantine_destination.exists()
+
+
+def test_quarantine_snapshot_preserves_internal_symlinks(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    (source / "README.md").write_text("# AutoDev\n", encoding="utf-8")
+    (source / "README.link").symlink_to("README.md")
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run("AD-011", run_id="run-011-snapshot-quarantine")
+    workspace = manager.populate_workspace(run.run_id, str(source))
+
+    quarantined_path = manager.quarantine_run(run.run_id)
+
+    assert quarantined_path == manager.quarantine_dir(run.run_id) / workspace.name
+    assert (quarantined_path / "README.link").is_symlink()
+    assert os.readlink(quarantined_path / "README.link") == "README.md"
+
+
+def test_quarantine_snapshot_rejects_symlink_escaping_workspace(tmp_path):
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("host data\n", encoding="utf-8")
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    (source / "escape.link").symlink_to(outside_file)
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run("AD-011", run_id="run-011-snapshot-bad-quarantine")
+    workspace = Path(run.workspace_path)
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "escape.link").symlink_to(outside_file)
+    quarantine_destination = manager.quarantine_dir(run.run_id) / workspace.name
+
+    with pytest.raises(ValueError, match="resolves outside source tree"):
+        manager.quarantine_run(run.run_id)
+
+    assert not quarantine_destination.exists()

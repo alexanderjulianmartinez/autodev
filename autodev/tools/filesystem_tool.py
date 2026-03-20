@@ -81,7 +81,10 @@ class FilesystemTool(Tool):
     # ------------------------------------------------------------------
 
     def _resolve(self, path: str) -> Path:
-        target = Path(path).resolve()
+        candidate = Path(path)
+        if not candidate.is_absolute() and self.base_path is not None:
+            candidate = self.base_path / candidate
+        target = candidate.resolve()
         if self.base_path is not None:
             try:
                 target.relative_to(self.base_path)

@@ -99,14 +99,7 @@ class WorkspaceManager:
         if any(workspace.iterdir()):
             raise ValueError(f"Workspace for run {run_id!r} is already populated")
 
-        self._validate_symlinks_within_source(source)
-        shutil.copytree(
-            source,
-            workspace,
-            dirs_exist_ok=True,
-            symlinks=True,
-            ignore_dangling_symlinks=True,
-        )
+        self._copy_tree_preserving_symlinks(source, workspace, dirs_exist_ok=True)
         self._update_run_metadata(run_id, {"source_path": str(source)})
         return workspace
 
@@ -235,7 +228,7 @@ class WorkspaceManager:
             if run.isolation_mode == IsolationMode.WORKTREE:
                 self._quarantine_worktree_repository(run, workspace, destination)
             else:
-                shutil.copytree(workspace, destination)
+                self._copy_tree_preserving_symlinks(workspace, destination)
         except Exception:
             if destination.exists():
                 shutil.rmtree(destination, ignore_errors=True)
@@ -387,6 +380,22 @@ class WorkspaceManager:
         path.mkdir(parents=True, exist_ok=True)
         if any(path.iterdir()):
             raise ValueError(f"Workspace assets for run {run_id!r} are already populated")
+
+    def _copy_tree_preserving_symlinks(
+        self,
+        source: Path,
+        destination: Path,
+        *,
+        dirs_exist_ok: bool = False,
+    ) -> None:
+        self._validate_symlinks_within_source(source)
+        shutil.copytree(
+            source,
+            destination,
+            dirs_exist_ok=dirs_exist_ok,
+            symlinks=True,
+            ignore_dangling_symlinks=True,
+        )
 
     def _validate_symlinks_within_source(self, source: Path) -> None:
         source_root = source.resolve()

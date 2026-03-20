@@ -82,6 +82,24 @@ class TestFilesystemTool:
             tool.write_file(path, "data")
             assert tool.file_exists(path)
 
+    def test_relative_paths_resolve_against_base_path(self, tmp_path):
+        tool = FilesystemTool(base_path=str(tmp_path))
+
+        tool.write_file("notes.txt", "hello")
+
+        assert (tmp_path / "notes.txt").read_text(encoding="utf-8") == "hello"
+        assert tool.read_file("notes.txt") == "hello"
+        assert tool.file_exists("notes.txt")
+
+    def test_list_files_accepts_relative_directory_from_base_path(self, tmp_path):
+        tool = FilesystemTool(base_path=str(tmp_path))
+        tool.write_file("src/app.py", "print('hi')\n")
+        tool.write_file("src/readme.txt", "hello\n")
+
+        py_files = tool.list_files("src", pattern="*.py")
+
+        assert py_files == [str(tmp_path / "src" / "app.py")]
+
     def test_outside_base_path_raises(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = FilesystemTool(base_path=tmpdir)
@@ -126,6 +144,34 @@ class TestFilesystemTool:
         decisions = store.load_report_entries("guardrails")
         assert decisions[-1]["target"] == str(blocked_path)
         assert decisions[-1]["allowed"] is False
+
+    def test_repo_internal_bin_and_etc_directories_are_allowed(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        supervisor = Supervisor(state_store=store)
+        tool = FilesystemTool(base_path=str(tmp_path), supervisor=supervisor)
+        bin_target = tmp_path / "bin" / "script.sh"
+        etc_target = tmp_path / "config" / "etc" / "settings.ini"
+
+        tool.write_file(str(bin_target), "echo safe\n")
+        tool.write_file(str(etc_target), "[app]\nmode=safe\n")
+
+        decisions = store.load_report_entries("guardrails")
+        assert bin_target.read_text(encoding="utf-8") == "echo safe\n"
+        assert etc_target.read_text(encoding="utf-8") == "[app]\nmode=safe\n"
+        assert decisions[-2]["allowed"] is True
+        assert decisions[-1]["allowed"] is True
+
+    def test_os_protected_prefixes_remain_blocked(self):
+        supervisor = Supervisor()
+
+        assert supervisor.validate_file_write("/etc/passwd") == (
+            False,
+            "Blocked file write path: '/etc'",
+        )
+        assert supervisor.validate_file_write("/usr/bin/tool") == (
+            False,
+            "Blocked file write path: '/usr/bin'",
+        )
 
     def test_allowed_file_write_is_persisted(self, tmp_path):
         store = FileStateStore(str(tmp_path / "state"))
