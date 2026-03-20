@@ -419,7 +419,9 @@ def test_quarantine_worktree_fallback_preserves_internal_symlinks(tmp_path):
     store.update_run(
         run.run_id,
         lambda current: current.model_copy(
-            update={"metadata": {k: v for k, v in current.metadata.items() if k != "base_repo_path"}}
+            update={
+                "metadata": {k: v for k, v in current.metadata.items() if k != "base_repo_path"}
+            }
         ),
     )
 
@@ -447,7 +449,9 @@ def test_quarantine_worktree_fallback_rejects_escaping_symlink(tmp_path):
     store.update_run(
         run.run_id,
         lambda current: current.model_copy(
-            update={"metadata": {k: v for k, v in current.metadata.items() if k != "base_repo_path"}}
+            update={
+                "metadata": {k: v for k, v in current.metadata.items() if k != "base_repo_path"}
+            }
         ),
     )
     quarantine_destination = manager.quarantine_dir(run.run_id) / workspace.name

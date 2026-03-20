@@ -185,7 +185,7 @@ class Orchestrator:
                         status=final_run_status,
                         quarantine_on_failure=final_run_status == RunStatus.FAILED,
                     )
-                except Exception as exc:
+                except Exception:
                     logger.exception("Failed to finalize run %s", run_id)
                     try:
                         self.state_store.update_run(
@@ -194,7 +194,7 @@ class Orchestrator:
                                 update={
                                     "metadata": {
                                         **current.metadata,
-                                        "finalize_run_error": str(exc),
+                                        "finalize_run_error": str(pipeline_error),
                                         "finalize_run_error_at": utc_now().isoformat(),
                                     }
                                 }
