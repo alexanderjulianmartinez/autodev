@@ -6,7 +6,7 @@ import logging
 import subprocess
 from typing import Any
 
-from autodev.core.supervisor import BLOCKED_PATTERNS
+from autodev.core.supervisor import Supervisor
 from autodev.tools.base import Tool
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 class ShellTool(Tool):
     """Executes shell commands after validating them against a blocklist."""
+
+    def __init__(self, supervisor: Supervisor | None = None) -> None:
+        self.supervisor = supervisor or Supervisor()
 
     def execute(self, input: dict[str, Any]) -> dict[str, Any]:
         """Execute *input['command']* and return stdout/stderr/returncode."""
@@ -33,7 +36,14 @@ class ShellTool(Tool):
         Returns a dict with keys: stdout, stderr, returncode.
         Blocked commands are rejected without execution.
         """
-        is_safe, reason = self._validate(command)
+        is_safe, reason = self.supervisor.validate_command(command)
+        self.supervisor.record_decision(
+            operation="shell_command",
+            target=command,
+            allowed=is_safe,
+            reason=reason,
+            metadata={"cwd": cwd or "", "timeout": timeout},
+        )
         if not is_safe:
             logger.warning("ShellTool blocked command %r: %s", command, reason)
             return {"stdout": "", "stderr": f"Blocked: {reason}", "returncode": 1}
@@ -56,15 +66,3 @@ class ShellTool(Tool):
             return {"stdout": "", "stderr": "Command timed out", "returncode": 1}
         except Exception as exc:
             return {"stdout": "", "stderr": str(exc), "returncode": 1}
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _validate(command: str) -> tuple[bool, str]:
-        lowered = command.lower()
-        for pattern in BLOCKED_PATTERNS:
-            if pattern.lower() in lowered:
-                return False, f"Blocked pattern: '{pattern}'"
-        return True, "ok"

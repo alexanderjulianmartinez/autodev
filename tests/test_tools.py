@@ -1,11 +1,17 @@
 """Tests for tool components."""
 
 import os
+import subprocess
+import sys
 import tempfile
+from unittest.mock import patch
 
 import pytest
 
+from autodev.core.state_store import FileStateStore
+from autodev.core.supervisor import Supervisor
 from autodev.tools.filesystem_tool import FilesystemTool
+from autodev.tools.git_tool import GitTool
 from autodev.tools.shell_tool import ShellTool
 from autodev.tools.test_runner import TestRunner
 
@@ -40,6 +46,20 @@ class TestShellTool:
         result = tool.execute({"command": "echo test"})
         assert result["returncode"] == 0
 
+    def test_guardrail_decisions_are_persisted_for_shell_commands(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        supervisor = Supervisor(state_store=store)
+        tool = ShellTool(supervisor=supervisor)
+
+        blocked = tool.run("rm -rf /")
+        allowed = tool.run("echo hello")
+        decisions = store.load_report_entries("guardrails")
+
+        assert blocked["returncode"] != 0
+        assert allowed["returncode"] == 0
+        assert [entry["allowed"] for entry in decisions] == [False, True]
+        assert [entry["operation"] for entry in decisions] == ["shell_command", "shell_command"]
+
 
 class TestFilesystemTool:
     def test_write_and_read(self):
@@ -66,11 +86,109 @@ class TestFilesystemTool:
             tool.write_file(path, "data")
             assert tool.file_exists(path)
 
+    def test_relative_paths_resolve_against_base_path(self, tmp_path):
+        tool = FilesystemTool(base_path=str(tmp_path))
+
+        tool.write_file("notes.txt", "hello")
+
+        assert (tmp_path / "notes.txt").read_text(encoding="utf-8") == "hello"
+        assert tool.read_file("notes.txt") == "hello"
+        assert tool.file_exists("notes.txt")
+
+    def test_list_files_accepts_relative_directory_from_base_path(self, tmp_path):
+        tool = FilesystemTool(base_path=str(tmp_path))
+        tool.write_file("src/app.py", "print('hi')\n")
+        tool.write_file("src/readme.txt", "hello\n")
+
+        py_files = tool.list_files("src", pattern="*.py")
+
+        assert py_files == [str(tmp_path / "src" / "app.py")]
+
     def test_outside_base_path_raises(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = FilesystemTool(base_path=tmpdir)
             with pytest.raises(ValueError, match="outside"):
                 tool.read_file("/etc/passwd")
+
+    def test_prefix_matching_path_outside_base_path_is_rejected(self, tmp_path):
+        base_path = tmp_path / "base"
+        base_path.mkdir(parents=True)
+        sibling_path = tmp_path / "base-evil"
+        sibling_path.mkdir(parents=True)
+        target = sibling_path / "outside.txt"
+        target.write_text("escape", encoding="utf-8")
+
+        tool = FilesystemTool(base_path=str(base_path))
+
+        with pytest.raises(ValueError, match="outside"):
+            tool.write_file(str(target), "still blocked")
+
+    def test_blocked_file_write_is_rejected_and_persisted(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        supervisor = Supervisor(state_store=store)
+        tool = FilesystemTool(base_path=str(tmp_path), supervisor=supervisor)
+        blocked_path = tmp_path / ".git" / "config"
+
+        with pytest.raises(PermissionError, match="Blocked file write"):
+            tool.write_file(str(blocked_path), "unsafe")
+
+        decisions = store.load_report_entries("guardrails")
+        assert decisions[-1]["operation"] == "file_write"
+        assert decisions[-1]["allowed"] is False
+
+    def test_blocked_worktree_git_file_write_is_rejected(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        supervisor = Supervisor(state_store=store)
+        tool = FilesystemTool(base_path=str(tmp_path), supervisor=supervisor)
+        blocked_path = tmp_path / "workspace" / ".git"
+
+        with pytest.raises(PermissionError, match="Blocked file write"):
+            tool.write_file(str(blocked_path), "gitdir: /tmp/repo/.git/worktrees/run\n")
+
+        decisions = store.load_report_entries("guardrails")
+        assert decisions[-1]["target"] == str(blocked_path)
+        assert decisions[-1]["allowed"] is False
+
+    def test_repo_internal_bin_and_etc_directories_are_allowed(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        supervisor = Supervisor(state_store=store)
+        tool = FilesystemTool(base_path=str(tmp_path), supervisor=supervisor)
+        bin_target = tmp_path / "bin" / "script.sh"
+        etc_target = tmp_path / "config" / "etc" / "settings.ini"
+
+        tool.write_file(str(bin_target), "echo safe\n")
+        tool.write_file(str(etc_target), "[app]\nmode=safe\n")
+
+        decisions = store.load_report_entries("guardrails")
+        assert bin_target.read_text(encoding="utf-8") == "echo safe\n"
+        assert etc_target.read_text(encoding="utf-8") == "[app]\nmode=safe\n"
+        assert decisions[-2]["allowed"] is True
+        assert decisions[-1]["allowed"] is True
+
+    def test_os_protected_prefixes_remain_blocked(self):
+        supervisor = Supervisor()
+
+        assert supervisor.validate_file_write("/etc/passwd") == (
+            False,
+            "Blocked file write path: '/etc'",
+        )
+        assert supervisor.validate_file_write("/usr/bin/tool") == (
+            False,
+            "Blocked file write path: '/usr/bin'",
+        )
+
+    def test_allowed_file_write_is_persisted(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        supervisor = Supervisor(state_store=store)
+        tool = FilesystemTool(base_path=str(tmp_path), supervisor=supervisor)
+        target = tmp_path / "notes.txt"
+
+        tool.write_file(str(target), "safe")
+
+        decisions = store.load_report_entries("guardrails")
+        assert target.read_text(encoding="utf-8") == "safe"
+        assert decisions[-1]["operation"] == "file_write"
+        assert decisions[-1]["allowed"] is True
 
 
 class TestTestRunner:
@@ -91,3 +209,86 @@ class TestTestRunner:
                 f.write("def test_fail():\n    assert 1 == 2\n")
             result = runner.run(repo_path=tmpdir, test_command="pytest test_fail.py -v")
             assert not result.passed
+
+    def test_blocked_test_command_is_rejected_by_supervisor(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        supervisor = Supervisor(state_store=store)
+        runner = TestRunner(supervisor=supervisor)
+
+        result = runner.run(repo_path=str(tmp_path), test_command="sudo pytest")
+
+        assert not result.passed
+        assert "Blocked:" in result.error
+        assert store.load_report_entries("guardrails")[-1]["operation"] == "test_command"
+
+
+class TestGitTool:
+    def test_missing_git_cli_raises_clear_runtime_error(self):
+        tool = GitTool()
+
+        with patch("autodev.tools.git_tool.subprocess.run", side_effect=FileNotFoundError()):
+            with pytest.raises(RuntimeError, match="git executable is not available"):
+                tool._run_git_command(["status"])
+
+    def test_run_git_command_redacts_credentials_from_git_error_output(self):
+        tool = GitTool()
+        git_error = (
+            "fatal: could not read Username for "
+            "'https://ghp_secret-token@github.com/octocat/Hello-World.git': auth failed"
+        )
+
+        with patch(
+            "autodev.tools.git_tool.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "clone"],
+                returncode=128,
+                stdout="",
+                stderr=git_error,
+            ),
+        ):
+            with pytest.raises(RuntimeError) as exc_info:
+                tool._run_git_command(
+                    ["clone", "https://ghp_secret-token@github.com/test/repo.git"]
+                )
+
+        assert "ghp_secret-token" not in str(exc_info.value)
+        assert "https://***@github.com/octocat/Hello-World.git" in str(exc_info.value)
+
+    def test_clone_logs_sanitized_repo_url(self, caplog):
+        tool = GitTool()
+        repo_url = "https://ghp_secret-token@github.com/octocat/Hello-World.git"
+
+        class FakeRepo:
+            @staticmethod
+            def clone_from(_repo_url, _dest_path):
+                return None
+
+        fake_git_module = type("FakeGitModule", (), {"Repo": FakeRepo})()
+
+        with patch.dict(sys.modules, {"git": fake_git_module}):
+            with caplog.at_level("INFO"):
+                tool.clone(repo_url, "/tmp/hello-world")
+
+        assert "ghp_secret-token" not in caplog.text
+        assert "github.com/octocat/Hello-World.git" in caplog.text
+
+    def test_clone_redacts_credentials_from_gitpython_error(self):
+        tool = GitTool()
+        repo_url = "https://ghp_secret-token@github.com/octocat/Hello-World.git"
+
+        class FakeRepo:
+            @staticmethod
+            def clone_from(_repo_url, _dest_path):
+                raise Exception(
+                    "fatal: could not read Username for "
+                    "'https://ghp_secret-token@github.com/octocat/Hello-World.git': auth failed"
+                )
+
+        fake_git_module = type("FakeGitModule", (), {"Repo": FakeRepo})()
+
+        with patch.dict(sys.modules, {"git": fake_git_module}):
+            with pytest.raises(RuntimeError) as exc_info:
+                tool.clone(repo_url, "/tmp/hello-world")
+
+        assert "ghp_secret-token" not in str(exc_info.value)
+        assert "https://***@github.com/octocat/Hello-World.git" in str(exc_info.value)

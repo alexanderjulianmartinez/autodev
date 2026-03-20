@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Iterable, TypeVar
@@ -20,6 +21,7 @@ from autodev.core.schemas import (
 )
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
+SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class FileStateStore:
@@ -58,6 +60,23 @@ class FileStateStore:
         directory.mkdir(parents=True, exist_ok=True)
         return directory
 
+    def _ensure_child_dir(self, parent: Path, child_name: str) -> Path:
+        directory = (parent / child_name).resolve()
+        try:
+            directory.relative_to(parent.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Invalid directory name: {child_name!r}") from exc
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def _validate_identifier(self, value: str, *, kind: str) -> str:
+        candidate = value.strip()
+        if not candidate or candidate in {".", ".."}:
+            raise ValueError(f"Invalid {kind} identifier: {value!r}")
+        if not SAFE_IDENTIFIER_PATTERN.fullmatch(candidate):
+            raise ValueError(f"Invalid {kind} identifier: {value!r}")
+        return candidate
+
     def _backlog_path(self, item_id: str) -> Path:
         return self.backlog_dir / f"{item_id}.json"
 
@@ -65,7 +84,12 @@ class FileStateStore:
         return self.tasks_dir / f"{task_id}.json"
 
     def _run_dir(self, run_id: str) -> Path:
-        return self._ensure_dir(f"runs/{run_id}")
+        safe_run_id = self._validate_identifier(run_id, kind="run")
+        return self._ensure_child_dir(self.runs_dir, safe_run_id)
+
+    def run_dir(self, run_id: str) -> Path:
+        """Return the durable directory for one run."""
+        return self._run_dir(run_id)
 
     def _run_metadata_path(self, run_id: str) -> Path:
         return self._run_dir(run_id) / "metadata.json"
@@ -86,7 +110,8 @@ class FileStateStore:
         return review_dir / f"{task_id}.json"
 
     def _report_path(self, report_name: str) -> Path:
-        return self.reports_dir / f"{report_name}.json"
+        safe_report_name = self._validate_identifier(report_name, kind="report")
+        return self.reports_dir / f"{safe_report_name}.json"
 
     def _scheduler_state_path(self) -> Path:
         return self.scheduler_dir / "state.json"
@@ -208,15 +233,43 @@ class FileStateStore:
     # ------------------------------------------------------------------
 
     def save_report(self, report_name: str, payload: dict[str, Any]) -> Path:
+        if not isinstance(payload, dict):
+            raise ValueError(f"Report {report_name!r} must be a JSON object")
         path = self._report_path(report_name)
         self._write_json(path, payload)
         return path
 
     def load_report(self, report_name: str) -> dict[str, Any]:
-        return self._read_json(self._report_path(report_name))
+        payload = self._read_json(self._report_path(report_name))
+        if not isinstance(payload, dict):
+            raise ValueError(f"Report {report_name!r} must be a JSON object")
+        return payload
 
     def list_reports(self) -> list[str]:
         return sorted(path.stem for path in self.reports_dir.glob("*.json"))
+
+    def append_report_entry(self, report_name: str, entry: dict[str, Any]) -> Path:
+        path = self._report_path(report_name)
+        if path.exists():
+            payload = self._read_json(path)
+            if not isinstance(payload, list):
+                raise ValueError(f"Report {report_name!r} must be a JSON list to append entries")
+            entries = payload
+        else:
+            entries = []
+
+        entries.append(entry)
+        self._write_json(path, entries)
+        return path
+
+    def load_report_entries(self, report_name: str) -> list[dict[str, Any]]:
+        path = self._report_path(report_name)
+        if not path.exists():
+            return []
+        payload = self._read_json(path)
+        if not isinstance(payload, list):
+            raise ValueError(f"Report {report_name!r} must be a JSON list")
+        return payload
 
     def save_scheduler_state(self, payload: dict[str, Any]) -> Path:
         path = self._scheduler_state_path()

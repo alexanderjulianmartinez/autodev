@@ -26,6 +26,7 @@ from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskNode, TaskScheduler
 from autodev.core.task_materializer import TaskMaterializer
+from autodev.core.workspace_manager import WorkspaceManager
 
 __all__ = [
     "BacklogService",
@@ -55,4 +56,5 @@ __all__ = [
     "ValidationCommandResult",
     "ValidationResult",
     "ValidationStatus",
+    "WorkspaceManager",
 ]

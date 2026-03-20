@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from autodev.core.supervisor import Supervisor
 from autodev.tools.base import Tool
 
 logger = logging.getLogger(__name__)
@@ -16,8 +17,13 @@ logger = logging.getLogger(__name__)
 class FilesystemTool(Tool):
     """Provides file operations sandboxed to a configured base path."""
 
-    def __init__(self, base_path: str | None = None) -> None:
+    def __init__(
+        self,
+        base_path: str | None = None,
+        supervisor: Supervisor | None = None,
+    ) -> None:
         self.base_path = Path(base_path).resolve() if base_path else None
+        self.supervisor = supervisor or Supervisor()
 
     def execute(self, input: dict[str, Any]) -> dict[str, Any]:
         action = input.get("action", "")
@@ -41,6 +47,16 @@ class FilesystemTool(Tool):
 
     def write_file(self, path: str, content: str) -> None:
         resolved = self._resolve(path)
+        is_safe, reason = self.supervisor.validate_file_write(str(resolved))
+        self.supervisor.record_decision(
+            operation="file_write",
+            target=str(resolved),
+            allowed=is_safe,
+            reason=reason,
+            metadata={"base_path": str(self.base_path) if self.base_path else ""},
+        )
+        if not is_safe:
+            raise PermissionError(reason)
         logger.debug("Writing file: %s", resolved)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content, encoding="utf-8")
@@ -65,7 +81,15 @@ class FilesystemTool(Tool):
     # ------------------------------------------------------------------
 
     def _resolve(self, path: str) -> Path:
-        target = Path(path).resolve()
-        if self.base_path is not None and not str(target).startswith(str(self.base_path)):
-            raise ValueError(f"Path {path!r} is outside the allowed base path {self.base_path!r}")
+        candidate = Path(path)
+        if not candidate.is_absolute() and self.base_path is not None:
+            candidate = self.base_path / candidate
+        target = candidate.resolve()
+        if self.base_path is not None:
+            try:
+                target.relative_to(self.base_path)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Path {path!r} is outside the allowed base path {self.base_path!r}"
+                ) from exc
         return target

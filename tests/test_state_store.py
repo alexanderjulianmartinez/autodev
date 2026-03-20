@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from autodev.core.schemas import (
     BacklogItem,
     BacklogStatus,
@@ -108,6 +110,35 @@ def test_reports_and_scheduler_history_persist(tmp_path):
     ]
 
 
+def test_report_entries_can_be_appended_and_reloaded(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    first_path = store.append_report_entry("guardrails", {"allowed": False, "operation": "shell"})
+    second_path = store.append_report_entry("guardrails", {"allowed": True, "operation": "file"})
+
+    assert first_path == tmp_path / "state" / "reports" / "guardrails.json"
+    assert second_path == tmp_path / "state" / "reports" / "guardrails.json"
+    assert store.load_report_entries("guardrails") == [
+        {"allowed": False, "operation": "shell"},
+        {"allowed": True, "operation": "file"},
+    ]
+
+
+def test_save_report_rejects_non_object_payload(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        store.save_report("guardrails", [{"allowed": False}])
+
+
+def test_load_report_rejects_list_based_report(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    store.append_report_entry("guardrails", {"allowed": False, "operation": "shell"})
+
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        store.load_report("guardrails")
+
+
 def test_interrupted_run_can_be_reloaded_without_losing_state(tmp_path):
     store = FileStateStore(str(tmp_path / "state"))
     run = RunMetadata(
@@ -136,3 +167,45 @@ def test_interrupted_run_can_be_reloaded_without_losing_state(tmp_path):
     assert reloaded_store.load_run("run-restore") == run
     assert reloaded_store.load_task_result("run-restore", "AD-004__implement") == result
     assert reloaded_store.load_review_result("run-restore", "AD-004__review") == review
+
+
+def test_run_dir_rejects_traversal_run_id(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="Invalid run identifier"):
+        store.run_dir("../escape")
+
+
+def test_run_dir_rejects_path_separator_in_run_id(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="Invalid run identifier"):
+        store.run_dir("nested/run")
+
+
+def test_run_dir_accepts_safe_run_id(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    run_dir = store.run_dir("run-011_safe.case")
+
+    assert run_dir == tmp_path / "state" / "runs" / "run-011_safe.case"
+
+
+def test_report_name_rejects_traversal_on_save_load_and_append(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.save_report("../escape", {"status": "bad"})
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.load_report("../escape")
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.append_report_entry("../escape", {"status": "bad"})
+
+
+def test_report_name_rejects_path_separator(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="Invalid report identifier"):
+        store.save_report("nested/report", {"status": "bad"})
