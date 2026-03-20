@@ -233,12 +233,17 @@ class FileStateStore:
     # ------------------------------------------------------------------
 
     def save_report(self, report_name: str, payload: dict[str, Any]) -> Path:
+        if not isinstance(payload, dict):
+            raise ValueError(f"Report {report_name!r} must be a JSON object")
         path = self._report_path(report_name)
         self._write_json(path, payload)
         return path
 
     def load_report(self, report_name: str) -> dict[str, Any]:
-        return self._read_json(self._report_path(report_name))
+        payload = self._read_json(self._report_path(report_name))
+        if not isinstance(payload, dict):
+            raise ValueError(f"Report {report_name!r} must be a JSON object")
+        return payload
 
     def list_reports(self) -> list[str]:
         return sorted(path.stem for path in self.reports_dir.glob("*.json"))

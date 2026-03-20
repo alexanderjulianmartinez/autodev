@@ -19,7 +19,7 @@ from autodev.agents.coder import CoderAgent
 from autodev.agents.debugger import DebuggerAgent
 from autodev.agents.planner import PlannerAgent
 from autodev.agents.reviewer import ReviewerAgent
-from autodev.core.schemas import IsolationMode, RunStatus
+from autodev.core.schemas import IsolationMode, RunStatus, utc_now
 from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph
@@ -185,10 +185,23 @@ class Orchestrator:
                         status=final_run_status,
                         quarantine_on_failure=final_run_status == RunStatus.FAILED,
                     )
-                except Exception:
+                except Exception as exc:
                     logger.exception("Failed to finalize run %s", run_id)
-                    if pipeline_error is None:
-                        raise
+                    try:
+                        self.state_store.update_run(
+                            run_id,
+                            lambda current: current.model_copy(
+                                update={
+                                    "metadata": {
+                                        **current.metadata,
+                                        "finalize_run_error": str(exc),
+                                        "finalize_run_error_at": utc_now().isoformat(),
+                                    }
+                                }
+                            ),
+                        )
+                    except Exception:
+                        logger.exception("Failed to persist finalize error for run %s", run_id)
 
     # ------------------------------------------------------------------
     # Private stage helpers

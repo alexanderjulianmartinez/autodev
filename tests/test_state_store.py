@@ -124,6 +124,21 @@ def test_report_entries_can_be_appended_and_reloaded(tmp_path):
     ]
 
 
+def test_save_report_rejects_non_object_payload(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        store.save_report("guardrails", [{"allowed": False}])
+
+
+def test_load_report_rejects_list_based_report(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    store.append_report_entry("guardrails", {"allowed": False, "operation": "shell"})
+
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        store.load_report("guardrails")
+
+
 def test_interrupted_run_can_be_reloaded_without_losing_state(tmp_path):
     store = FileStateStore(str(tmp_path / "state"))
     run = RunMetadata(

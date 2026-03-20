@@ -155,11 +155,14 @@ class GitTool(Tool):
         logger.info("Pushed branch %r", branch_name)
 
     def _run_git_command(self, args: list[str]) -> None:
-        completed = subprocess.run(
-            ["git", *args],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                ["git", *args],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("git executable is not available") from exc
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "git failed")

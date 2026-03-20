@@ -2,12 +2,14 @@
 
 import os
 import tempfile
+from unittest.mock import patch
 
 import pytest
 
 from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.tools.filesystem_tool import FilesystemTool
+from autodev.tools.git_tool import GitTool
 from autodev.tools.shell_tool import ShellTool
 from autodev.tools.test_runner import TestRunner
 
@@ -216,3 +218,12 @@ class TestTestRunner:
         assert not result.passed
         assert "Blocked:" in result.error
         assert store.load_report_entries("guardrails")[-1]["operation"] == "test_command"
+
+
+class TestGitTool:
+    def test_missing_git_cli_raises_clear_runtime_error(self):
+        tool = GitTool()
+
+        with patch("autodev.tools.git_tool.subprocess.run", side_effect=FileNotFoundError()):
+            with pytest.raises(RuntimeError, match="git executable is not available"):
+                tool._run_git_command(["status"])

@@ -253,6 +253,37 @@ class TestOrchestrator:
         assert finalized["quarantine_on_failure"] is False
         assert orch.state == PipelineState.COMPLETED
 
+    def test_run_pipeline_does_not_fail_when_finalize_run_errors_after_success(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path), dry_run=True)
+
+        monkeypatch.setattr(orch, "_read_issue", lambda context: context)
+        monkeypatch.setattr(
+            orch,
+            "_plan",
+            lambda context: context.model_copy(update={"plan": ["1. ok"]}),
+        )
+        monkeypatch.setattr(orch, "_implement", lambda context: context)
+        monkeypatch.setattr(
+            orch,
+            "_validate",
+            lambda context: context.model_copy(update={"validation_results": "PASSED"}),
+        )
+        monkeypatch.setattr(orch, "_review", lambda context: context)
+
+        def finalize_run(_run_id, *, status, quarantine_on_failure=False):
+            raise RuntimeError("teardown failed")
+
+        monkeypatch.setattr(orch.workspace_manager, "finalize_run", finalize_run)
+
+        context = orch.run_pipeline("https://github.com/octocat/Hello-World/issues/12")
+        run = orch.state_store.load_run(context.metadata["run_id"])
+
+        assert orch.state == PipelineState.COMPLETED
+        assert run.metadata["finalize_run_error"] == "teardown failed"
+        assert "finalize_run_error_at" in run.metadata
+
     def test_run_pipeline_finalizes_failed_run_with_quarantine(self, tmp_path, monkeypatch):
         orch = Orchestrator(work_dir=str(tmp_path), dry_run=True)
         finalized: dict[str, object] = {}
