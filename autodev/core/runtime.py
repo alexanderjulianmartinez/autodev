@@ -17,7 +17,7 @@ from autodev.agents.coder import CoderAgent
 from autodev.agents.debugger import DebuggerAgent
 from autodev.agents.planner import PlannerAgent
 from autodev.agents.reviewer import ReviewerAgent
-from autodev.core.schemas import IsolationMode
+from autodev.core.schemas import IsolationMode, RunStatus
 from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph
@@ -49,13 +49,17 @@ class Orchestrator:
         work_dir: str | None = None,
         isolation_mode: IsolationMode = IsolationMode.SNAPSHOT,
     ) -> None:
-        self.supervisor = Supervisor(max_iterations=max_iterations)
         self.task_graph = TaskGraph.default_pipeline()
         self.model_router = ModelRouter()
         self.dry_run = dry_run
         self.work_dir = work_dir or tempfile.mkdtemp(prefix="autodev_")
         self.isolation_mode = isolation_mode
         self.state_store = FileStateStore(os.path.join(self.work_dir, "state"))
+        self.supervisor = Supervisor(
+            max_iterations=max_iterations,
+            state_store=self.state_store,
+            report_name="guardrails-session",
+        )
         self.workspace_manager = WorkspaceManager(self.state_store)
         self._state: PipelineState = PipelineState.PENDING
         self._stage_outputs: dict[str, Any] = {}
@@ -89,76 +93,99 @@ class Orchestrator:
         self._stage_outputs.clear()
 
         context = AgentContext(issue_url=issue_url)
+        final_run_status: RunStatus | None = None
+        pipeline_error: Exception | None = None
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            transient=True,
-            console=console,
-        ) as progress:
-            # 1. Read issue
-            task = progress.add_task("Analyzing issue...", total=None)
-            context = self._read_issue(context)
-            self._stage_outputs["intake"] = {"status": "completed"}
-            progress.update(task, completed=True)
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                transient=True,
+                console=console,
+            ) as progress:
+                # 1. Read issue
+                task = progress.add_task("Analyzing issue...", total=None)
+                context = self._read_issue(context)
+                self._stage_outputs["intake"] = {"status": "completed"}
+                progress.update(task, completed=True)
 
-            progress.update(task, description="Preparing run workspace...")
-            context = self._start_run(context)
-            self._stage_outputs["run"] = {"status": "completed"}
+                progress.update(task, description="Preparing run workspace...")
+                context = self._start_run(context)
+                self._stage_outputs["run"] = {"status": "completed"}
 
-            # 2. Clone repo
-            progress.update(task, description="Cloning repository...")
-            context = self._clone_repo(context)
+                # 2. Clone repo
+                progress.update(task, description="Cloning repository...")
+                context = self._clone_repo(context)
 
-            # 3. Plan
-            progress.update(task, description="Generating plan...")
-            context = self._plan(context)
-            self._stage_outputs["plan"] = {"status": "completed"}
-            console.print(f"[green]Plan:[/green] {len(context.plan)} step(s)")
+                # 3. Plan
+                progress.update(task, description="Generating plan...")
+                context = self._plan(context)
+                self._stage_outputs["plan"] = {"status": "completed"}
+                console.print(f"[green]Plan:[/green] {len(context.plan)} step(s)")
 
-            # 4. Implement → Validate loop
-            for iteration in range(self.supervisor.max_iterations):
-                progress.update(
-                    task, description=f"Implementing changes (iteration {iteration + 1})..."
-                )
-                context = self._implement(context)
-                self._stage_outputs["implement"] = {
-                    "status": "completed",
-                    "iteration": iteration + 1,
-                }
+                # 4. Implement → Validate loop
+                for iteration in range(self.supervisor.max_iterations):
+                    progress.update(
+                        task, description=f"Implementing changes (iteration {iteration + 1})..."
+                    )
+                    context = self._implement(context)
+                    self._stage_outputs["implement"] = {
+                        "status": "completed",
+                        "iteration": iteration + 1,
+                    }
 
-                progress.update(task, description="Running validation...")
-                context = self._validate(context)
-                self._stage_outputs["validate"] = {
-                    "status": "completed",
-                    "iteration": iteration + 1,
-                }
+                    progress.update(task, description="Running validation...")
+                    context = self._validate(context)
+                    self._stage_outputs["validate"] = {
+                        "status": "completed",
+                        "iteration": iteration + 1,
+                    }
 
-                if "PASSED" in context.validation_results or context.validation_results == "":
-                    break
+                    if "PASSED" in context.validation_results or context.validation_results == "":
+                        break
 
-                progress.update(task, description="Debugging validation failures...")
-                context = self._debug(context)
-                self.supervisor.increment()
-                if self.supervisor.check_iteration_limit():
-                    logger.warning("Max iterations reached; proceeding with current state.")
-                    break
+                    progress.update(task, description="Debugging validation failures...")
+                    context = self._debug(context)
+                    self.supervisor.increment()
+                    if self.supervisor.check_iteration_limit():
+                        logger.warning("Max iterations reached; proceeding with current state.")
+                        break
 
-            # 5. Review
-            progress.update(task, description="Reviewing changes...")
-            context = self._review(context)
-            self._stage_outputs["review"] = {"status": "completed"}
+                # 5. Review
+                progress.update(task, description="Reviewing changes...")
+                context = self._review(context)
+                self._stage_outputs["review"] = {"status": "completed"}
 
-            # 6. Open PR
-            if not self.dry_run:
-                progress.update(task, description="Opening pull request...")
-                context = self._open_pr(context)
-            else:
-                console.print("[yellow]Dry run: skipping PR creation[/yellow]")
+                # 6. Open PR
+                if not self.dry_run:
+                    progress.update(task, description="Opening pull request...")
+                    context = self._open_pr(context)
+                else:
+                    console.print("[yellow]Dry run: skipping PR creation[/yellow]")
 
-        self._state = PipelineState.COMPLETED
-        console.print(Panel("[bold green]Pipeline complete![/bold green]", expand=False))
-        return context
+            self._state = PipelineState.COMPLETED
+            final_run_status = RunStatus.COMPLETED
+            console.print(Panel("[bold green]Pipeline complete![/bold green]", expand=False))
+            return context
+        except Exception as exc:
+            self._state = PipelineState.FAILED
+            final_run_status = RunStatus.FAILED
+            pipeline_error = exc
+            logger.exception("Pipeline failed while processing %s", issue_url)
+            raise
+        finally:
+            run_id = context.metadata.get("run_id")
+            if run_id and final_run_status is not None:
+                try:
+                    self.workspace_manager.finalize_run(
+                        run_id,
+                        status=final_run_status,
+                        quarantine_on_failure=final_run_status == RunStatus.FAILED,
+                    )
+                except Exception:
+                    logger.exception("Failed to finalize run %s", run_id)
+                    if pipeline_error is None:
+                        raise
 
     # ------------------------------------------------------------------
     # Private stage helpers
@@ -191,6 +218,7 @@ class Orchestrator:
             isolation_mode=self.isolation_mode,
             metadata=run_metadata,
         )
+        self.supervisor.configure_reporting(report_name=f"guardrails-{run.run_id}")
         metadata.update(
             {
                 "run_id": run.run_id,

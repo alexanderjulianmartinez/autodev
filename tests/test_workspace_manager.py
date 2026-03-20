@@ -144,6 +144,26 @@ def test_capture_implementation_artifacts_persists_diff_and_changed_files(tmp_pa
     }
     assert run_copy.metadata["implementation_diff_path"] == str(artifacts["diff"])
     assert run_copy.metadata["changed_files_path"] == str(artifacts["changed_files"])
+    assert run_copy.metadata["implementation_artifact_capture"]["success"] is True
+
+
+def test_capture_implementation_artifacts_surfaces_non_git_failure(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run("AD-011", run_id="run-011")
+    workspace = Path(run.workspace_path)
+    (workspace / "README.md").write_text("not a git repo\n", encoding="utf-8")
+
+    artifacts = manager.capture_implementation_artifacts(run.run_id)
+    diff_text = artifacts["diff"].read_text(encoding="utf-8")
+    changed_files = json.loads(artifacts["changed_files"].read_text(encoding="utf-8"))
+    run_copy = store.load_run(run.run_id)
+
+    assert "Artifact capture failed:" in diff_text
+    assert changed_files["success"] is False
+    assert "not a git repository" in changed_files["error"]
+    assert run_copy.metadata["implementation_artifact_capture"]["success"] is False
+    assert run_copy.metadata["implementation_artifact_capture"]["errors"]
 
 
 def test_finalize_run_can_quarantine_failure_and_teardown_worktree(tmp_path):

@@ -6,7 +6,7 @@ import pytest
 
 from autodev.agents.base import AgentContext
 from autodev.core.runtime import Orchestrator, PipelineState
-from autodev.core.schemas import IsolationMode
+from autodev.core.schemas import IsolationMode, RunStatus
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskNode
 
@@ -125,3 +125,84 @@ class TestOrchestrator:
 
         assert updated.metadata["isolation_mode"] == IsolationMode.BRANCH.value
         assert run.isolation_mode == IsolationMode.BRANCH
+
+    def test_start_run_configures_run_scoped_guardrail_report(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+
+        context = AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/11")
+        updated = orch._start_run(context)
+        run_id = updated.metadata["run_id"]
+
+        orch.supervisor.record_decision(
+            operation="shell_command",
+            target="echo hello",
+            allowed=True,
+            reason="ok",
+        )
+
+        entries = orch.state_store.load_report_entries(f"guardrails-{run_id}")
+
+        assert len(entries) == 1
+        assert entries[0]["operation"] == "shell_command"
+        assert entries[0]["target"] == "echo hello"
+        assert entries[0]["allowed"] is True
+        assert entries[0]["reason"] == "ok"
+
+    def test_run_pipeline_finalizes_completed_run(self, tmp_path, monkeypatch):
+        orch = Orchestrator(work_dir=str(tmp_path), dry_run=True)
+        finalized: dict[str, object] = {}
+
+        monkeypatch.setattr(orch, "_read_issue", lambda context: context)
+        monkeypatch.setattr(
+            orch,
+            "_plan",
+            lambda context: context.model_copy(update={"plan": ["1. ok"]}),
+        )
+        monkeypatch.setattr(orch, "_implement", lambda context: context)
+        monkeypatch.setattr(
+            orch,
+            "_validate",
+            lambda context: context.model_copy(update={"validation_results": "PASSED"}),
+        )
+        monkeypatch.setattr(orch, "_review", lambda context: context)
+
+        def finalize_run(run_id, *, status, quarantine_on_failure=False):
+            finalized["run_id"] = run_id
+            finalized["status"] = status
+            finalized["quarantine_on_failure"] = quarantine_on_failure
+            return orch.state_store.load_run(run_id)
+
+        monkeypatch.setattr(orch.workspace_manager, "finalize_run", finalize_run)
+
+        context = orch.run_pipeline("https://github.com/octocat/Hello-World/issues/12")
+
+        assert finalized["run_id"] == context.metadata["run_id"]
+        assert finalized["status"] == RunStatus.COMPLETED
+        assert finalized["quarantine_on_failure"] is False
+        assert orch.state == PipelineState.COMPLETED
+
+    def test_run_pipeline_finalizes_failed_run_with_quarantine(self, tmp_path, monkeypatch):
+        orch = Orchestrator(work_dir=str(tmp_path), dry_run=True)
+        finalized: dict[str, object] = {}
+
+        monkeypatch.setattr(orch, "_read_issue", lambda context: context)
+
+        def fail_plan(_context):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(orch, "_plan", fail_plan)
+
+        def finalize_run(run_id, *, status, quarantine_on_failure=False):
+            finalized["run_id"] = run_id
+            finalized["status"] = status
+            finalized["quarantine_on_failure"] = quarantine_on_failure
+            return orch.state_store.load_run(run_id)
+
+        monkeypatch.setattr(orch.workspace_manager, "finalize_run", finalize_run)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            orch.run_pipeline("https://github.com/octocat/Hello-World/issues/13")
+
+        assert finalized["status"] == RunStatus.FAILED
+        assert finalized["quarantine_on_failure"] is True
+        assert orch.state == PipelineState.FAILED

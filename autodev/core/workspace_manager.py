@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -13,6 +16,8 @@ from autodev.core.schemas import IsolationMode, RunMetadata, RunStatus, utc_now
 from autodev.core.state_store import FileStateStore
 from autodev.github.repo_cloner import RepoCloner
 from autodev.tools.git_tool import GitTool
+
+logger = logging.getLogger(__name__)
 
 
 class WorkspaceManager:
@@ -246,40 +251,70 @@ class WorkspaceManager:
         return destination
 
     def capture_implementation_artifacts(self, run_id: str) -> dict[str, Path]:
-        diff_path = self.capture_diff(run_id)
-        changed_files_path = self.save_changed_files_summary(run_id)
+        diff_path, diff_success, diff_error = self._capture_diff_artifact(run_id)
+        changed_files_path, changed_files_success, changed_files_error = (
+            self._capture_changed_files_artifact(run_id)
+        )
+        errors = [error for error in [diff_error, changed_files_error] if error]
         self._update_run_metadata(
             run_id,
             {
                 "implementation_diff_path": str(diff_path),
                 "changed_files_path": str(changed_files_path),
                 "last_artifact_capture_at": utc_now().isoformat(),
+                "implementation_artifact_capture": {
+                    "success": diff_success and changed_files_success,
+                    "diff_success": diff_success,
+                    "changed_files_success": changed_files_success,
+                    "errors": errors,
+                },
             },
         )
         return {"diff": diff_path, "changed_files": changed_files_path}
 
     def capture_diff(self, run_id: str) -> Path:
-        workspace = self.workspace_dir(run_id)
-        diff_text = self._run_git_command(workspace, ["diff", "--no-color", "--binary"])
-        path = self.artifacts_dir(run_id) / "working_tree.diff"
-        self._write_text(path, diff_text)
+        path, _success, _error = self._capture_diff_artifact(run_id)
         return path
 
     def save_changed_files_summary(self, run_id: str) -> Path:
-        workspace = self.workspace_dir(run_id)
-        status_output = self._run_git_command(workspace, ["status", "--short"])
-        files = []
-        for line in status_output.splitlines():
-            if not line.strip():
-                continue
-            status = line[:2].strip()
-            path = line[3:].strip()
-            files.append({"path": path, "status": status})
+        path, _success, _error = self._capture_changed_files_artifact(run_id)
+        return path
 
-        payload = {"generated_at": utc_now().isoformat(), "files": files}
+    def _capture_diff_artifact(self, run_id: str) -> tuple[Path, bool, Optional[str]]:
+        workspace = self.workspace_dir(run_id)
+        success, diff_text, error = self._run_git_command(
+            workspace,
+            ["diff", "--no-color", "--binary"],
+        )
+        path = self.artifacts_dir(run_id) / "working_tree.diff"
+        if success:
+            self._write_text(path, diff_text)
+        else:
+            self._write_text(path, f"Artifact capture failed: {error or 'unknown git error'}\n")
+        return path, success, error
+
+    def _capture_changed_files_artifact(self, run_id: str) -> tuple[Path, bool, Optional[str]]:
+        workspace = self.workspace_dir(run_id)
+        success, status_output, error = self._run_git_command(workspace, ["status", "--short"])
+        files = []
+        if success:
+            for line in status_output.splitlines():
+                if not line.strip():
+                    continue
+                status = line[:2].strip()
+                path = line[3:].strip()
+                files.append({"path": path, "status": status})
+
+        payload = {
+            "generated_at": utc_now().isoformat(),
+            "success": success,
+            "files": files,
+        }
+        if error:
+            payload["error"] = error
         path = self.artifacts_dir(run_id) / "changed_files.json"
         self._write_json(path, payload)
-        return path
+        return path, success, error
 
     def _update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> RunMetadata:
         return self.state_store.update_run(
@@ -313,26 +348,59 @@ class WorkspaceManager:
         if workspace.exists():
             shutil.rmtree(workspace, ignore_errors=True)
 
-    def _run_git_command(self, workspace: Path, args: list[str]) -> str:
-        if not (workspace / ".git").exists():
-            return ""
+    def _run_git_command(self, workspace: Path, args: list[str]) -> tuple[bool, str, Optional[str]]:
+        git_path = workspace / ".git"
+        if not git_path.exists():
+            error = f"Workspace {workspace} is not a git repository"
+            logger.warning("Skipping git command %s: %s", args, error)
+            return False, "", error
 
-        completed = subprocess.run(
-            ["git", "-C", str(workspace), *args],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(workspace), *args],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            error = "git executable is not available"
+            logger.exception("Failed to run git command %s in %s", args, workspace)
+            return False, "", error
+
         if completed.returncode != 0:
-            return ""
-        return completed.stdout
+            error = completed.stderr.strip() or completed.stdout.strip() or "git command failed"
+            logger.warning(
+                "Git command failed in %s: git %s (%s)",
+                workspace,
+                " ".join(args),
+                error,
+            )
+            return False, completed.stdout, error
+        return True, completed.stdout, None
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
+        content = f"{json.dumps(payload, indent=2, sort_keys=True)}\n"
+        self._atomic_write_text(path, content)
 
     def _write_text(self, path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         if content and not content.endswith("\n"):
             content = f"{content}\n"
-        path.write_text(content, encoding="utf-8")
+        self._atomic_write_text(path, content)
+
+    def _atomic_write_text(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_path_str = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        temp_path = Path(temp_path_str)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()

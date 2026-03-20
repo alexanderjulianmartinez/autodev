@@ -31,6 +31,7 @@ BLOCKED_WRITE_PATH_PATTERNS: list[str] = [
 ]
 
 BLOCKED_WRITE_FILENAMES: set[str] = {
+    ".git",
     ".bashrc",
     ".zshrc",
     ".gitconfig",
@@ -108,6 +109,18 @@ class Supervisor:
         if self._state_store is not None:
             self._state_store.append_report_entry(self._report_name, entry)
         return entry
+
+    def configure_reporting(
+        self,
+        *,
+        state_store: FileStateStore | None = None,
+        report_name: str | None = None,
+    ) -> None:
+        """Update persistence settings for future guardrail decisions."""
+        if state_store is not None:
+            self._state_store = state_store
+        if report_name is not None:
+            self._report_name = report_name
 
     # ------------------------------------------------------------------
     # Iteration limits
