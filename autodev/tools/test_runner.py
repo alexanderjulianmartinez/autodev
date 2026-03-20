@@ -7,6 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+from autodev.core.supervisor import Supervisor
 from autodev.tools.base import Tool
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,12 @@ class TestResult:
 class TestRunner(Tool):
     """Executes a test suite and returns structured results."""
 
+    __test__ = False
+
     DEFAULT_TIMEOUT = 120
+
+    def __init__(self, supervisor: Supervisor | None = None) -> None:
+        self.supervisor = supervisor or Supervisor()
 
     def execute(self, input: dict[str, Any]) -> dict[str, Any]:
         result = self.run(
@@ -40,6 +46,21 @@ class TestRunner(Tool):
     def run(self, repo_path: str = ".", test_command: str = "pytest") -> TestResult:
         """Run *test_command* in *repo_path* and return a TestResult."""
         logger.info("Running tests in %r with command %r", repo_path, test_command)
+        is_safe, reason = self.supervisor.validate_command(test_command)
+        self.supervisor.record_decision(
+            operation="test_command",
+            target=test_command,
+            allowed=is_safe,
+            reason=reason,
+            metadata={"repo_path": repo_path},
+        )
+        if not is_safe:
+            return TestResult(
+                passed=False,
+                output="",
+                error=f"Blocked: {reason}",
+                return_code=1,
+            )
         try:
             proc = subprocess.run(
                 test_command,

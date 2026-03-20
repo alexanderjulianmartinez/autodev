@@ -1,8 +1,12 @@
 """Tests for core components: TaskGraph, Supervisor, unified Orchestrator."""
 
+from pathlib import Path
+
 import pytest
 
+from autodev.agents.base import AgentContext
 from autodev.core.runtime import Orchestrator, PipelineState
+from autodev.core.schemas import IsolationMode
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskNode
 
@@ -94,3 +98,30 @@ class TestOrchestrator:
         result = orch.execute({"stages": []}, {"key": "value"})
         assert result["key"] == "value"
         assert orch.state == PipelineState.COMPLETED
+
+    def test_start_run_creates_dedicated_workspace_record(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+
+        context = AgentContext(
+            issue_url="https://github.com/octocat/Hello-World/issues/9",
+            metadata={"repo_full_name": "octocat/Hello-World"},
+        )
+
+        updated = orch._start_run(context)
+        run = orch.state_store.load_run(updated.metadata["run_id"])
+
+        assert updated.metadata["backlog_item_id"] == "issue-9"
+        assert updated.repo_path == updated.metadata["workspace_path"]
+        assert Path(updated.repo_path).exists()
+        assert run.workspace_path == updated.repo_path
+        assert run.metadata["issue_url"] == context.issue_url
+
+    def test_start_run_respects_configured_isolation_mode(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path), isolation_mode=IsolationMode.BRANCH)
+
+        context = AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/10")
+        updated = orch._start_run(context)
+        run = orch.state_store.load_run(updated.metadata["run_id"])
+
+        assert updated.metadata["isolation_mode"] == IsolationMode.BRANCH.value
+        assert run.isolation_mode == IsolationMode.BRANCH

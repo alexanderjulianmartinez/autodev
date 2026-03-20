@@ -141,8 +141,10 @@ The biggest gaps are:
 
 ### AD-009 Implement a workspace manager with snapshots and run-local metadata
 
+- **Status:** completed on 2026-03-19
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
+- **Completion notes:** added [autodev/core/workspace_manager.py](autodev/core/workspace_manager.py) for per-run workspace directories, file snapshots, and persisted implementation diff/changed-file artifacts backed by [autodev/core/state_store.py](autodev/core/state_store.py), with focused coverage in [tests/test_workspace_manager.py](tests/test_workspace_manager.py) and [tests/test_core.py](tests/test_core.py).
 - **Problem:** The current runtime clones a repo into a temp dir, but it does not manage snapshots, run metadata, or rollback.
 - **Scope:** Add a workspace manager responsible for per-run directories, file snapshots, and diff capture.
 - **Acceptance criteria:**
@@ -152,8 +154,10 @@ The biggest gaps are:
 
 ### AD-010 Add optional git branch and worktree isolation modes
 
+- **Status:** completed on 2026-03-19
 - **Priority:** `priority:p1`
 - **Type:** `type:core`
+- **Completion notes:** extended [autodev/core/workspace_manager.py](autodev/core/workspace_manager.py) and [autodev/tools/git_tool.py](autodev/tools/git_tool.py) with configurable snapshot, branch, and worktree isolation plus teardown/quarantine helpers, and threaded configurable run isolation through [autodev/core/runtime.py](autodev/core/runtime.py), covered by [tests/test_workspace_manager.py](tests/test_workspace_manager.py) and [tests/test_core.py](tests/test_core.py).
 - **Problem:** Safe execution isolation is a core design goal, but the current runtime has only a basic clone path.
 - **Scope:** Support multiple isolation levels such as in-place with snapshots, branch-per-run, and worktree-per-run.
 - **Acceptance criteria:**
@@ -163,8 +167,10 @@ The biggest gaps are:
 
 ### AD-011 Enforce supervisor checks around unsafe shell and file operations
 
+- **Status:** completed on 2026-03-19
 - **Priority:** `priority:p1`
 - **Type:** `type:core`
+- **Completion notes:** extended [autodev/core/supervisor.py](autodev/core/supervisor.py) and [autodev/core/state_store.py](autodev/core/state_store.py) so guardrail decisions are structured and persisted, and wired supervisor enforcement into [autodev/tools/shell_tool.py](autodev/tools/shell_tool.py), [autodev/tools/filesystem_tool.py](autodev/tools/filesystem_tool.py), and [autodev/tools/test_runner.py](autodev/tools/test_runner.py), with focused coverage in [tests/test_tools.py](tests/test_tools.py) and [tests/test_state_store.py](tests/test_state_store.py).
 - **Problem:** Safety checks exist, but they are not yet integrated as a first-class execution guardrail across runtime operations.
 - **Scope:** Apply supervisor validation consistently before shell commands, file writes, and promotion steps.
 - **Acceptance criteria:**

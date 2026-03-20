@@ -67,6 +67,10 @@ class FileStateStore:
     def _run_dir(self, run_id: str) -> Path:
         return self._ensure_dir(f"runs/{run_id}")
 
+    def run_dir(self, run_id: str) -> Path:
+        """Return the durable directory for one run."""
+        return self._run_dir(run_id)
+
     def _run_metadata_path(self, run_id: str) -> Path:
         return self._run_dir(run_id) / "metadata.json"
 
@@ -217,6 +221,29 @@ class FileStateStore:
 
     def list_reports(self) -> list[str]:
         return sorted(path.stem for path in self.reports_dir.glob("*.json"))
+
+    def append_report_entry(self, report_name: str, entry: dict[str, Any]) -> Path:
+        path = self._report_path(report_name)
+        if path.exists():
+            payload = self._read_json(path)
+            if not isinstance(payload, list):
+                raise ValueError(f"Report {report_name!r} must be a JSON list to append entries")
+            entries = payload
+        else:
+            entries = []
+
+        entries.append(entry)
+        self._write_json(path, entries)
+        return path
+
+    def load_report_entries(self, report_name: str) -> list[dict[str, Any]]:
+        path = self._report_path(report_name)
+        if not path.exists():
+            return []
+        payload = self._read_json(path)
+        if not isinstance(payload, list):
+            raise ValueError(f"Report {report_name!r} must be a JSON list")
+        return payload
 
     def save_scheduler_state(self, payload: dict[str, Any]) -> Path:
         path = self._scheduler_state_path()

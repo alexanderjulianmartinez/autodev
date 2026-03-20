@@ -17,8 +17,11 @@ from autodev.agents.coder import CoderAgent
 from autodev.agents.debugger import DebuggerAgent
 from autodev.agents.planner import PlannerAgent
 from autodev.agents.reviewer import ReviewerAgent
+from autodev.core.schemas import IsolationMode
+from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph
+from autodev.core.workspace_manager import WorkspaceManager
 from autodev.github.issue_reader import IssueReader
 from autodev.github.pr_creator import PRCreator
 from autodev.github.repo_cloner import RepoCloner
@@ -44,12 +47,16 @@ class Orchestrator:
         max_iterations: int = 3,
         dry_run: bool = False,
         work_dir: str | None = None,
+        isolation_mode: IsolationMode = IsolationMode.SNAPSHOT,
     ) -> None:
         self.supervisor = Supervisor(max_iterations=max_iterations)
         self.task_graph = TaskGraph.default_pipeline()
         self.model_router = ModelRouter()
         self.dry_run = dry_run
         self.work_dir = work_dir or tempfile.mkdtemp(prefix="autodev_")
+        self.isolation_mode = isolation_mode
+        self.state_store = FileStateStore(os.path.join(self.work_dir, "state"))
+        self.workspace_manager = WorkspaceManager(self.state_store)
         self._state: PipelineState = PipelineState.PENDING
         self._stage_outputs: dict[str, Any] = {}
 
@@ -94,6 +101,10 @@ class Orchestrator:
             context = self._read_issue(context)
             self._stage_outputs["intake"] = {"status": "completed"}
             progress.update(task, completed=True)
+
+            progress.update(task, description="Preparing run workspace...")
+            context = self._start_run(context)
+            self._stage_outputs["run"] = {"status": "completed"}
 
             # 2. Clone repo
             progress.update(task, description="Cloning repository...")
@@ -166,15 +177,46 @@ class Orchestrator:
             logger.warning("Could not read issue (%s); continuing without it.", exc)
             return context
 
+    def _start_run(self, context: AgentContext) -> AgentContext:
+        metadata = dict(context.metadata)
+        backlog_item_id = metadata.get("backlog_item_id") or self._derive_backlog_item_id(
+            context.issue_url
+        )
+        run_metadata = {"issue_url": context.issue_url}
+        if metadata.get("repo_full_name"):
+            run_metadata["repo_full_name"] = metadata["repo_full_name"]
+
+        run = self.workspace_manager.create_run(
+            backlog_item_id=backlog_item_id,
+            isolation_mode=self.isolation_mode,
+            metadata=run_metadata,
+        )
+        metadata.update(
+            {
+                "run_id": run.run_id,
+                "backlog_item_id": backlog_item_id,
+                "workspace_path": run.workspace_path,
+                "isolation_mode": run.isolation_mode.value,
+            }
+        )
+        return context.model_copy(update={"repo_path": run.workspace_path, "metadata": metadata})
+
     def _clone_repo(self, context: AgentContext) -> AgentContext:
         repo_full_name = context.metadata.get("repo_full_name", "")
         if not repo_full_name:
             return context
         try:
-            cloner = RepoCloner()
-            dest = os.path.join(self.work_dir, repo_full_name.replace("/", "_"))
-            path = cloner.clone(repo_full_name, dest)
-            return context.model_copy(update={"repo_path": path})
+            run_id = context.metadata.get("run_id")
+            if run_id:
+                path = str(self.workspace_manager.clone_repo(run_id, repo_full_name))
+            else:
+                cloner = RepoCloner()
+                dest = os.path.join(self.work_dir, repo_full_name.replace("/", "_"))
+                path = cloner.clone(repo_full_name, dest)
+
+            metadata = dict(context.metadata)
+            metadata["workspace_path"] = path
+            return context.model_copy(update={"repo_path": path, "metadata": metadata})
         except Exception as exc:
             logger.warning("Could not clone repo (%s); continuing.", exc)
             return context
@@ -185,10 +227,19 @@ class Orchestrator:
 
     def _implement(self, context: AgentContext) -> AgentContext:
         coder = CoderAgent(model_router=self.model_router)
-        return coder.run("implement change request", context)
+        updated = coder.run("implement change request", context)
+        run_id = updated.metadata.get("run_id") or context.metadata.get("run_id")
+        if not run_id:
+            return updated
+
+        artifacts = self.workspace_manager.capture_implementation_artifacts(run_id)
+        metadata = dict(updated.metadata)
+        metadata["implementation_diff_path"] = str(artifacts["diff"])
+        metadata["changed_files_path"] = str(artifacts["changed_files"])
+        return updated.model_copy(update={"metadata": metadata})
 
     def _validate(self, context: AgentContext) -> AgentContext:
-        runner = TestRunner()
+        runner = TestRunner(supervisor=self.supervisor)
         repo_path = context.repo_path or self.work_dir
         result = runner.run(repo_path)
         status = "PASSED" if result.passed else "FAILED"
@@ -236,6 +287,11 @@ class Orchestrator:
     def reset(self) -> None:
         self._state = PipelineState.PENDING
         self._stage_outputs.clear()
+
+    @staticmethod
+    def _derive_backlog_item_id(issue_url: str) -> str:
+        token = issue_url.rstrip("/").split("/")[-1] if issue_url else "adhoc"
+        return f"issue-{token or 'adhoc'}"
 
 
 RuntimeOrchestrator = Orchestrator

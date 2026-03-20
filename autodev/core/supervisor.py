@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import logging
 
+from autodev.core.schemas import utc_now
+from autodev.core.state_store import FileStateStore
+
 logger = logging.getLogger(__name__)
 
 # Shell patterns that must never be executed.
@@ -18,13 +21,37 @@ BLOCKED_PATTERNS: list[str] = [
     "curl http",
 ]
 
+BLOCKED_WRITE_PATH_PATTERNS: list[str] = [
+    "/.git/",
+    "/.ssh/",
+    "/etc/",
+    "/bin/",
+    "/usr/bin/",
+    "/system/",
+]
+
+BLOCKED_WRITE_FILENAMES: set[str] = {
+    ".bashrc",
+    ".zshrc",
+    ".gitconfig",
+    "authorized_keys",
+}
+
 
 class Supervisor:
     """Validates commands and enforces execution limits."""
 
-    def __init__(self, max_iterations: int = 3) -> None:
+    def __init__(
+        self,
+        max_iterations: int = 3,
+        *,
+        state_store: FileStateStore | None = None,
+        report_name: str = "guardrails",
+    ) -> None:
         self.max_iterations = max_iterations
         self._iteration_count: int = 0
+        self._state_store = state_store
+        self._report_name = report_name
 
     # ------------------------------------------------------------------
     # Command safety
@@ -42,6 +69,45 @@ class Supervisor:
                 logger.warning("Supervisor rejected command %r — %s", cmd, reason)
                 return False, reason
         return True, "ok"
+
+    def validate_file_write(self, path: str) -> tuple[bool, str]:
+        """Return (is_safe, reason) for a prospective file write."""
+        normalized = path.replace("\\", "/").lower()
+        for pattern in BLOCKED_WRITE_PATH_PATTERNS:
+            if pattern in normalized:
+                reason = f"Blocked file write path: '{pattern}'"
+                logger.warning("Supervisor rejected file write %r — %s", path, reason)
+                return False, reason
+
+        filename = normalized.rsplit("/", maxsplit=1)[-1]
+        if filename in BLOCKED_WRITE_FILENAMES:
+            reason = f"Blocked file write name: '{filename}'"
+            logger.warning("Supervisor rejected file write %r — %s", path, reason)
+            return False, reason
+
+        return True, "ok"
+
+    def record_decision(
+        self,
+        *,
+        operation: str,
+        target: str,
+        allowed: bool,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Persist and return a structured guardrail decision."""
+        entry: dict[str, object] = {
+            "recorded_at": utc_now().isoformat(),
+            "operation": operation,
+            "target": target,
+            "allowed": allowed,
+            "reason": reason,
+            "metadata": dict(metadata or {}),
+        }
+        if self._state_store is not None:
+            self._state_store.append_report_entry(self._report_name, entry)
+        return entry
 
     # ------------------------------------------------------------------
     # Iteration limits

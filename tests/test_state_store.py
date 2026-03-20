@@ -108,6 +108,20 @@ def test_reports_and_scheduler_history_persist(tmp_path):
     ]
 
 
+def test_report_entries_can_be_appended_and_reloaded(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+
+    first_path = store.append_report_entry("guardrails", {"allowed": False, "operation": "shell"})
+    second_path = store.append_report_entry("guardrails", {"allowed": True, "operation": "file"})
+
+    assert first_path == tmp_path / "state" / "reports" / "guardrails.json"
+    assert second_path == tmp_path / "state" / "reports" / "guardrails.json"
+    assert store.load_report_entries("guardrails") == [
+        {"allowed": False, "operation": "shell"},
+        {"allowed": True, "operation": "file"},
+    ]
+
+
 def test_interrupted_run_can_be_reloaded_without_losing_state(tmp_path):
     store = FileStateStore(str(tmp_path / "state"))
     run = RunMetadata(
