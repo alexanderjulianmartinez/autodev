@@ -478,6 +478,37 @@ def test_replace_repository_working_tree_cleans_destination_directory_symlink(tm
     assert (destination / "notes.txt").read_text(encoding="utf-8") == "updated\n"
 
 
+def test_resolve_worktree_git_dir_accepts_expected_base_repo_metadata_root(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    base_repo = tmp_path / "base-repo"
+    expected_git_dir = base_repo / ".git" / "worktrees" / "run-1"
+    expected_git_dir.mkdir(parents=True)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / ".git").write_text(f"gitdir: {expected_git_dir}\n", encoding="utf-8")
+
+    resolved = manager._resolve_worktree_git_dir(workspace, base_repo_path=base_repo)
+
+    assert resolved == expected_git_dir.resolve()
+
+
+def test_resolve_worktree_git_dir_rejects_pointer_outside_expected_root(tmp_path):
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    base_repo = tmp_path / "base-repo"
+    (base_repo / ".git" / "worktrees").mkdir(parents=True)
+    outside_git_dir = tmp_path / "outside-gitdir"
+    outside_git_dir.mkdir(parents=True)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / ".git").write_text(f"gitdir: {outside_git_dir}\n", encoding="utf-8")
+
+    resolved = manager._resolve_worktree_git_dir(workspace, base_repo_path=base_repo)
+
+    assert resolved is None
+
+
 def test_quarantine_snapshot_preserves_internal_symlinks(tmp_path):
     source = tmp_path / "source"
     source.mkdir(parents=True)

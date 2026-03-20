@@ -442,7 +442,11 @@ class WorkspaceManager:
 
         self._clone_standalone_repository(base_repo, destination, branch_name)
         self._replace_repository_working_tree(destination, workspace)
-        self._copy_worktree_git_state(workspace, destination)
+        self._copy_worktree_git_state(
+            workspace,
+            destination,
+            base_repo_path=base_repo,
+        )
 
     def _clone_standalone_repository(
         self,
@@ -503,8 +507,17 @@ class WorkspaceManager:
             return
         shutil.copy2(source, destination, follow_symlinks=False)
 
-    def _copy_worktree_git_state(self, source_workspace: Path, destination: Path) -> None:
-        source_git_dir = self._resolve_worktree_git_dir(source_workspace)
+    def _copy_worktree_git_state(
+        self,
+        source_workspace: Path,
+        destination: Path,
+        *,
+        base_repo_path: Path | None = None,
+    ) -> None:
+        source_git_dir = self._resolve_worktree_git_dir(
+            source_workspace,
+            base_repo_path=base_repo_path,
+        )
         if source_git_dir is None:
             return
 
@@ -532,7 +545,12 @@ class WorkspaceManager:
                     shutil.rmtree(destination_directory)
                 shutil.copytree(source_directory, destination_directory)
 
-    def _resolve_worktree_git_dir(self, workspace: Path) -> Optional[Path]:
+    def _resolve_worktree_git_dir(
+        self,
+        workspace: Path,
+        *,
+        base_repo_path: Path | None = None,
+    ) -> Optional[Path]:
         git_path = workspace / ".git"
         if git_path.is_dir():
             return git_path
@@ -548,7 +566,32 @@ class WorkspaceManager:
         resolved = Path(git_dir)
         if not resolved.is_absolute():
             resolved = (workspace / resolved).resolve()
+        if not resolved.is_dir():
+            logger.warning("Ignoring non-directory worktree gitdir %s", resolved)
+            return None
+
+        expected_root = self._expected_worktree_git_root(base_repo_path)
+        if expected_root is not None:
+            try:
+                resolved.relative_to(expected_root)
+            except ValueError:
+                logger.warning(
+                    "Ignoring worktree gitdir %s outside expected root %s",
+                    resolved,
+                    expected_root,
+                )
+                return None
+
         return resolved
+
+    def _expected_worktree_git_root(self, base_repo_path: Path | None) -> Optional[Path]:
+        if base_repo_path is None:
+            return None
+
+        expected_root = (base_repo_path / ".git" / "worktrees").resolve()
+        if expected_root.is_dir():
+            return expected_root
+        return None
 
     def _run_git_command(self, workspace: Path, args: list[str]) -> tuple[bool, str, Optional[str]]:
         git_path = workspace / ".git"
