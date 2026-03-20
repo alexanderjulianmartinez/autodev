@@ -36,6 +36,24 @@ def initialize_git_repo(path: Path) -> None:
     )
 
 
+def git_commit_all(path: Path, message: str) -> None:
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "AutoDev",
+        "GIT_AUTHOR_EMAIL": "autodev@example.com",
+        "GIT_COMMITTER_NAME": "AutoDev",
+        "GIT_COMMITTER_EMAIL": "autodev@example.com",
+    }
+    subprocess.run(["git", "-C", str(path), "add", "--all"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", message],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
 def test_create_run_persists_dedicated_workspace_record(tmp_path):
     store = FileStateStore(str(tmp_path / "state"))
     manager = WorkspaceManager(store)
@@ -161,6 +179,37 @@ def test_capture_implementation_artifacts_persists_diff_and_changed_files(tmp_pa
     assert run_copy.metadata["implementation_artifact_capture"]["success"] is True
 
 
+def test_capture_implementation_artifacts_tracks_renames_via_porcelain_status(tmp_path):
+    source_repo = tmp_path / "source-repo"
+    initialize_git_repo(source_repo)
+    original = source_repo / "old name.txt"
+    original.write_text("before rename\n", encoding="utf-8")
+    git_commit_all(source_repo, "Add rename target")
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run("AD-011", run_id="run-011-rename-status")
+    workspace = manager.populate_workspace(run.run_id, str(source_repo))
+
+    (workspace / "old name.txt").rename(workspace / "new name.txt")
+    subprocess.run(
+        ["git", "-C", str(workspace), "add", "--all"],
+        check=True,
+        capture_output=True,
+    )
+    artifacts = manager.capture_implementation_artifacts(run.run_id)
+    changed_files = json.loads(artifacts["changed_files"].read_text(encoding="utf-8"))
+
+    assert changed_files["success"] is True
+    assert changed_files["files"] == [
+        {
+            "path": "new name.txt",
+            "previous_path": "old name.txt",
+            "status": "R",
+        }
+    ]
+
+
 def test_capture_implementation_artifacts_surfaces_non_git_failure(tmp_path):
     store = FileStateStore(str(tmp_path / "state"))
     manager = WorkspaceManager(store)
@@ -178,6 +227,43 @@ def test_capture_implementation_artifacts_surfaces_non_git_failure(tmp_path):
     assert "not a git repository" in changed_files["error"]
     assert run_copy.metadata["implementation_artifact_capture"]["success"] is False
     assert run_copy.metadata["implementation_artifact_capture"]["errors"]
+
+
+def test_populate_workspace_preserves_internal_symlinks(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    real_file = source / "README.md"
+    real_file.write_text("# AutoDev\n", encoding="utf-8")
+    link_path = source / "README.link"
+    link_path.symlink_to("README.md")
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run("AD-009", run_id="run-009-symlink")
+
+    workspace = manager.populate_workspace(run.run_id, str(source))
+    copied_link = workspace / "README.link"
+
+    assert copied_link.is_symlink()
+    assert os.readlink(copied_link) == "README.md"
+
+
+def test_populate_workspace_rejects_symlink_escaping_source_tree(tmp_path):
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("host data\n", encoding="utf-8")
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    (source / "escape.link").symlink_to(outside_file)
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run("AD-009", run_id="run-009-bad-symlink")
+    workspace = Path(run.workspace_path)
+
+    with pytest.raises(ValueError, match="resolves outside source tree"):
+        manager.populate_workspace(run.run_id, str(source))
+
+    assert not any(workspace.iterdir())
 
 
 def test_finalize_run_can_quarantine_failure_and_teardown_worktree(tmp_path):
@@ -255,3 +341,47 @@ def test_quarantine_worktree_preserves_untracked_files_after_teardown(tmp_path):
 
     assert "notes.txt" in status_output
     assert (quarantined_path / "notes.txt").read_text(encoding="utf-8") == "needs inspection\n"
+
+
+def test_quarantine_worktree_preserves_internal_symlinks(tmp_path):
+    source_repo = tmp_path / "source-repo"
+    initialize_git_repo(source_repo)
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run(
+        "AD-011",
+        run_id="run-011-worktree-symlink",
+        isolation_mode=IsolationMode.WORKTREE,
+    )
+    workspace = manager.prepare_local_repository(run.run_id, str(source_repo))
+    (workspace / "notes.txt").write_text("needs inspection\n", encoding="utf-8")
+    (workspace / "notes.link").symlink_to("notes.txt")
+
+    quarantined_path = manager.quarantine_run(run.run_id)
+
+    assert (quarantined_path / "notes.link").is_symlink()
+    assert os.readlink(quarantined_path / "notes.link") == "notes.txt"
+
+
+def test_quarantine_worktree_rejects_symlink_escaping_workspace(tmp_path):
+    source_repo = tmp_path / "source-repo"
+    initialize_git_repo(source_repo)
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("host data\n", encoding="utf-8")
+
+    store = FileStateStore(str(tmp_path / "state"))
+    manager = WorkspaceManager(store)
+    run = manager.create_run(
+        "AD-011",
+        run_id="run-011-worktree-bad-symlink",
+        isolation_mode=IsolationMode.WORKTREE,
+    )
+    workspace = manager.prepare_local_repository(run.run_id, str(source_repo))
+    (workspace / "escape.link").symlink_to(outside_file)
+    quarantine_destination = manager.quarantine_dir(run.run_id) / workspace.name
+
+    with pytest.raises(ValueError, match="resolves outside source tree"):
+        manager.quarantine_run(run.run_id)
+
+    assert not quarantine_destination.exists()

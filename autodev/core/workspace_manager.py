@@ -99,7 +99,14 @@ class WorkspaceManager:
         if any(workspace.iterdir()):
             raise ValueError(f"Workspace for run {run_id!r} is already populated")
 
-        shutil.copytree(source, workspace, dirs_exist_ok=True)
+        self._validate_symlinks_within_source(source)
+        shutil.copytree(
+            source,
+            workspace,
+            dirs_exist_ok=True,
+            symlinks=True,
+            ignore_dangling_symlinks=True,
+        )
         self._update_run_metadata(run_id, {"source_path": str(source)})
         return workspace
 
@@ -224,10 +231,15 @@ class WorkspaceManager:
         destination = self.quarantine_dir(run_id) / workspace.name
         if destination.exists():
             shutil.rmtree(destination)
-        if run.isolation_mode == IsolationMode.WORKTREE:
-            self._quarantine_worktree_repository(run, workspace, destination)
-        else:
-            shutil.copytree(workspace, destination)
+        try:
+            if run.isolation_mode == IsolationMode.WORKTREE:
+                self._quarantine_worktree_repository(run, workspace, destination)
+            else:
+                shutil.copytree(workspace, destination)
+        except Exception:
+            if destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
+            raise
         return destination
 
     def rollback_run(self, run_id: str) -> None:
@@ -306,15 +318,11 @@ class WorkspaceManager:
 
     def _capture_changed_files_artifact(self, run_id: str) -> tuple[Path, bool, Optional[str]]:
         workspace = self.workspace_dir(run_id)
-        success, status_output, error = self._run_git_command(workspace, ["status", "--short"])
-        files = []
-        if success:
-            for line in status_output.splitlines():
-                if not line.strip():
-                    continue
-                status = line[:2].strip()
-                path = line[3:].strip()
-                files.append({"path": path, "status": status})
+        success, status_output, error = self._run_git_command(
+            workspace,
+            ["status", "--porcelain=v1", "-z"],
+        )
+        files = self._parse_porcelain_status(status_output) if success else []
 
         payload = {
             "generated_at": utc_now().isoformat(),
@@ -326,6 +334,30 @@ class WorkspaceManager:
         path = self.artifacts_dir(run_id) / "changed_files.json"
         self._write_json(path, payload)
         return path, success, error
+
+    def _parse_porcelain_status(self, status_output: str) -> list[dict[str, str]]:
+        entries: list[dict[str, str]] = []
+        records = status_output.split("\0")
+        index = 0
+        while index < len(records):
+            record = records[index]
+            index += 1
+            if not record:
+                continue
+            if len(record) < 3:
+                logger.warning("Skipping malformed git status record: %r", record)
+                continue
+
+            status = record[:2].strip()
+            path = record[3:]
+            entry: dict[str, str] = {"path": path, "status": status}
+            if status[:1] in {"R", "C"} and index < len(records):
+                previous_path = records[index]
+                index += 1
+                if previous_path:
+                    entry["previous_path"] = previous_path
+            entries.append(entry)
+        return entries
 
     def _update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> RunMetadata:
         return self.state_store.update_run(
@@ -355,6 +387,19 @@ class WorkspaceManager:
         path.mkdir(parents=True, exist_ok=True)
         if any(path.iterdir()):
             raise ValueError(f"Workspace assets for run {run_id!r} are already populated")
+
+    def _validate_symlinks_within_source(self, source: Path) -> None:
+        source_root = source.resolve()
+        for candidate in source_root.rglob("*"):
+            if not candidate.is_symlink():
+                continue
+            try:
+                target = candidate.resolve(strict=False)
+                target.relative_to(source_root)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise ValueError(
+                    f"Symlink {candidate} resolves outside source tree {source_root}"
+                ) from exc
 
     def _teardown_isolation(self, run: RunMetadata) -> None:
         workspace = Path(run.workspace_path).expanduser().resolve()
@@ -415,6 +460,8 @@ class WorkspaceManager:
             raise RuntimeError(f"Failed to create quarantined repository snapshot: {error}")
 
     def _replace_repository_working_tree(self, destination: Path, source_workspace: Path) -> None:
+        self._validate_symlinks_within_source(source_workspace)
+
         for child in destination.iterdir():
             if child.name == ".git":
                 continue
@@ -427,11 +474,22 @@ class WorkspaceManager:
             if child.name == ".git":
                 continue
             target = destination / child.name
-            if child.is_dir():
-                shutil.copytree(child, target)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(child, target)
+            self._copy_path_preserving_symlinks(child, target)
+
+    def _copy_path_preserving_symlinks(self, source: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_symlink():
+            shutil.copy2(source, destination, follow_symlinks=False)
+            return
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                destination,
+                symlinks=True,
+                ignore_dangling_symlinks=True,
+            )
+            return
+        shutil.copy2(source, destination, follow_symlinks=False)
 
     def _copy_worktree_git_state(self, source_workspace: Path, destination: Path) -> None:
         source_git_dir = self._resolve_worktree_git_dir(source_workspace)
