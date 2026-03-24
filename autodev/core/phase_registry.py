@@ -9,7 +9,6 @@ from typing import Any, Union
 from pydantic import Field
 
 from autodev.agents.base import AgentContext
-from autodev.agents.coder import CoderAgent
 from autodev.agents.planner import PlannerAgent
 from autodev.agents.reviewer import ReviewerAgent
 from autodev.core.schemas import AutoDevModel, PhaseName, TaskStatus, ValidationStatus, utc_now
@@ -121,6 +120,8 @@ class ImplementPhaseHandler(PhaseHandler):
         self._supervisor = supervisor
 
     def execute(self, payload: PhaseExecutionPayload) -> PhaseExecutionResult:
+        from autodev.agents.coder import CoderAgent
+
         agent = CoderAgent(
             model_router=self._model_router,
             workspace_manager=self._workspace_manager,
