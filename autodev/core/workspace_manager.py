@@ -83,6 +83,18 @@ class WorkspaceManager:
         artifacts.mkdir(parents=True, exist_ok=True)
         return artifacts
 
+    def save_planning_artifact(self, run_id: str, payload: dict[str, Any]) -> Path:
+        path = self.artifacts_dir(run_id) / "planning_summary.json"
+        self._write_json(path, payload)
+        self._update_run_metadata(
+            run_id,
+            {
+                "planning_artifact_path": str(path),
+                "last_planning_artifact_at": utc_now().isoformat(),
+            },
+        )
+        return path
+
     def populate_workspace(self, run_id: str, source_path: str) -> Path:
         run = self.state_store.load_run(run_id)
         if run.isolation_mode != IsolationMode.SNAPSHOT:

@@ -182,8 +182,10 @@ The biggest gaps are:
 
 ### AD-012 Replace ad hoc agent calls with a formal phase registry
 
+- **Status:** completed on 2026-03-20
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
+- **Completion notes:** added [autodev/core/phase_registry.py](autodev/core/phase_registry.py) with normalized phase payload/result contracts and swappable default handlers for `plan`, `implement`, `validate`, `review`, and `promote`, then wired [autodev/core/runtime.py](autodev/core/runtime.py) to dispatch core phases through the registry while preserving orchestration flow, covered by [tests/test_core.py](tests/test_core.py).
 - **Problem:** The runtime currently instantiates agents directly instead of dispatching through stable phase contracts.
 - **Scope:** Introduce a registry for planner, implementer, validator, reviewer, and promoter handlers with normalized input and output payloads.
 - **Acceptance criteria:**
@@ -193,8 +195,10 @@ The biggest gaps are:
 
 ### AD-013 Expand planner execution beyond prompt generation into repository-aware planning
 
+- **Status:** completed on 2026-03-24
 - **Priority:** `priority:p1`
 - **Type:** `type:core`
+- **Completion notes:** extended [autodev/agents/planner.py](autodev/agents/planner.py) with repository-aware target-file discovery, acceptance-criteria extraction, and validation hints while preserving fallback planning, then persisted planning summaries via [autodev/core/workspace_manager.py](autodev/core/workspace_manager.py) and [autodev/core/runtime.py](autodev/core/runtime.py), covered by [tests/test_agents.py](tests/test_agents.py) and [tests/test_core.py](tests/test_core.py).
 - **Problem:** The current planner produces a generic numbered list but does not inspect the repo or capture risk and validation intent.
 - **Scope:** Add repo inspection, target file identification, acceptance criteria extraction, and validation hints.
 - **Acceptance criteria:**
@@ -204,8 +208,10 @@ The biggest gaps are:
 
 ### AD-014 Replace the coder stub with an implementer that can produce controlled file edits
 
+- **Status:** completed on 2026-03-24
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
+- **Completion notes:** refactored [autodev/agents/coder.py](autodev/agents/coder.py) into a controlled workspace editor with per-file snapshots and rollback-aware write handling, then updated [autodev/core/phase_registry.py](autodev/core/phase_registry.py) and [autodev/core/runtime.py](autodev/core/runtime.py) so implement-stage file tracking comes from captured git diff/status artifacts instead of heuristics alone, covered by [tests/test_agents.py](tests/test_agents.py) and [tests/test_core.py](tests/test_core.py).
 - **Problem:** The current coder mostly records file paths and does not produce a real implementation artifact.
 - **Scope:** Introduce controlled edit application, file change summaries, and rollback-aware write behavior.
 - **Acceptance criteria:**

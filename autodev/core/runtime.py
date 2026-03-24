@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import tempfile
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -15,11 +17,9 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from autodev.agents.base import AgentContext
-from autodev.agents.coder import CoderAgent
 from autodev.agents.debugger import DebuggerAgent
-from autodev.agents.planner import PlannerAgent
-from autodev.agents.reviewer import ReviewerAgent
-from autodev.core.schemas import IsolationMode, RunStatus, utc_now
+from autodev.core.phase_registry import PhaseExecutionPayload, PhaseRegistry
+from autodev.core.schemas import IsolationMode, PhaseName, RunStatus, utc_now
 from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph
@@ -28,7 +28,6 @@ from autodev.github.issue_reader import IssueReader
 from autodev.github.pr_creator import PRCreator
 from autodev.github.repo_cloner import RepoCloner
 from autodev.models.router import ModelRouter
-from autodev.tools.test_runner import TestRunner
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -64,6 +63,11 @@ class Orchestrator:
             report_name="guardrails-session",
         )
         self.workspace_manager = WorkspaceManager(self.state_store)
+        self.phase_registry = PhaseRegistry.default(
+            model_router=self.model_router,
+            supervisor=self.supervisor,
+            workspace_manager=self.workspace_manager,
+        )
         self._state: PipelineState = PipelineState.PENDING
         self._stage_outputs: dict[str, Any] = {}
 
@@ -122,7 +126,6 @@ class Orchestrator:
                 # 3. Plan
                 progress.update(task, description="Generating plan...")
                 context = self._plan(context)
-                self._stage_outputs["plan"] = {"status": "completed"}
                 console.print(f"[green]Plan:[/green] {len(context.plan)} step(s)")
 
                 # 4. Implement → Validate loop
@@ -131,17 +134,15 @@ class Orchestrator:
                         task, description=f"Implementing changes (iteration {iteration + 1})..."
                     )
                     context = self._implement(context)
-                    self._stage_outputs["implement"] = {
-                        "status": "completed",
-                        "iteration": iteration + 1,
-                    }
+                    self._stage_outputs.setdefault("implement", {"status": "completed"})[
+                        "iteration"
+                    ] = iteration + 1
 
                     progress.update(task, description="Running validation...")
                     context = self._validate(context)
-                    self._stage_outputs["validate"] = {
-                        "status": "completed",
-                        "iteration": iteration + 1,
-                    }
+                    self._stage_outputs.setdefault("validate", {"status": "completed"})[
+                        "iteration"
+                    ] = iteration + 1
 
                     if "PASSED" in context.validation_results or context.validation_results == "":
                         break
@@ -156,7 +157,6 @@ class Orchestrator:
                 # 5. Review
                 progress.update(task, description="Reviewing changes...")
                 context = self._review(context)
-                self._stage_outputs["review"] = {"status": "completed"}
 
                 # 6. Open PR
                 if not self.dry_run:
@@ -205,6 +205,24 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Private stage helpers
     # ------------------------------------------------------------------
+
+    def register_phase_handler(self, phase: PhaseName, handler: Any) -> None:
+        self.phase_registry.register(phase, handler)
+
+    def _execute_phase(self, phase: PhaseName, context: AgentContext) -> AgentContext:
+        payload = PhaseExecutionPayload.from_context(
+            phase,
+            context,
+            task_id=self._phase_task_id(context, phase),
+        )
+        result = self.phase_registry.execute(payload)
+        self._stage_outputs[phase.value] = {
+            "status": result.status.value,
+            "message": result.message,
+            "artifacts": list(result.artifacts),
+            "metrics": dict(result.metrics),
+        }
+        return result.context
 
     def _read_issue(self, context: AgentContext) -> AgentContext:
         try:
@@ -271,37 +289,63 @@ class Orchestrator:
             return context
 
     def _plan(self, context: AgentContext) -> AgentContext:
-        planner = PlannerAgent(model_router=self.model_router)
-        return planner.run("plan change request", context)
+        updated = self._execute_phase(PhaseName.PLAN, context)
+        run_id = updated.metadata.get("run_id") or context.metadata.get("run_id")
+        if not run_id:
+            return updated
+
+        planning_payload = {
+            "generated_at": utc_now().isoformat(),
+            "issue_url": updated.issue_url,
+            "plan": list(updated.plan),
+            "planning_mode": updated.metadata.get("planning_mode", "fallback"),
+            "likely_target_files": list(updated.metadata.get("likely_target_files", [])),
+            "validation_hints": list(updated.metadata.get("validation_hints", [])),
+            "acceptance_criteria": list(updated.metadata.get("acceptance_criteria", [])),
+        }
+        artifact_path = self.workspace_manager.save_planning_artifact(run_id, planning_payload)
+        metadata = dict(updated.metadata)
+        metadata["planning_artifact_path"] = str(artifact_path)
+        self._stage_outputs.setdefault("plan", {}).setdefault("artifacts", [])
+        if str(artifact_path) not in self._stage_outputs["plan"]["artifacts"]:
+            self._stage_outputs["plan"]["artifacts"].append(str(artifact_path))
+        return updated.model_copy(update={"metadata": metadata})
 
     def _implement(self, context: AgentContext) -> AgentContext:
-        coder = CoderAgent(model_router=self.model_router)
-        updated = coder.run("implement change request", context)
+        updated = self._execute_phase(PhaseName.IMPLEMENT, context)
         run_id = updated.metadata.get("run_id") or context.metadata.get("run_id")
         if not run_id:
             return updated
 
         artifacts = self.workspace_manager.capture_implementation_artifacts(run_id)
+        files_modified = self._changed_files_from_artifact(artifacts["changed_files"])
         metadata = dict(updated.metadata)
         metadata["implementation_diff_path"] = str(artifacts["diff"])
         metadata["changed_files_path"] = str(artifacts["changed_files"])
-        return updated.model_copy(update={"metadata": metadata})
+        metadata["implementation_change_summary"] = files_modified
+        self._stage_outputs.setdefault("implement", {}).setdefault("artifacts", [])
+        for artifact in (artifacts["diff"], artifacts["changed_files"]):
+            if str(artifact) not in self._stage_outputs["implement"]["artifacts"]:
+                self._stage_outputs["implement"]["artifacts"].append(str(artifact))
+        self._stage_outputs.setdefault("implement", {}).setdefault("metrics", {})[
+            "files_modified"
+        ] = len(files_modified) or len(updated.files_modified)
+        return updated.model_copy(
+            update={
+                "files_modified": files_modified or list(updated.files_modified),
+                "metadata": metadata,
+            }
+        )
 
     def _validate(self, context: AgentContext) -> AgentContext:
-        runner = TestRunner(supervisor=self.supervisor)
-        repo_path = context.repo_path or self.work_dir
-        result = runner.run(repo_path)
-        status = "PASSED" if result.passed else "FAILED"
-        output = f"{status}\n{result.output}\n{result.error}".strip()
-        return context.model_copy(update={"validation_results": output})
+        return self._execute_phase(PhaseName.VALIDATE, context)
 
     def _debug(self, context: AgentContext) -> AgentContext:
         debugger = DebuggerAgent(model_router=self.model_router)
         return debugger.run("debug validation failures", context)
 
     def _review(self, context: AgentContext) -> AgentContext:
-        reviewer = ReviewerAgent(model_router=self.model_router)
-        return reviewer.run("review change request", context)
+        return self._execute_phase(PhaseName.REVIEW, context)
 
     def _open_pr(self, context: AgentContext) -> AgentContext:
         repo_full_name = context.metadata.get("repo_full_name", "")
@@ -348,6 +392,27 @@ class Orchestrator:
         raw_token = path_segments[-1] if path_segments else "adhoc"
         normalized = SAFE_BACKLOG_TOKEN_PATTERN.sub("-", raw_token.lower()).strip("-._")
         return f"issue-{normalized or 'adhoc'}"
+
+    @staticmethod
+    def _phase_task_id(context: AgentContext, phase: PhaseName) -> str:
+        run_id = str(context.metadata.get("run_id", "adhoc"))
+        return f"{run_id}-{phase.value}"
+
+    @staticmethod
+    def _changed_files_from_artifact(changed_files_path: os.PathLike[str] | str) -> list[str]:
+        try:
+            payload = json.loads(Path(changed_files_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return []
+        if not payload.get("success"):
+            return []
+
+        changed_files: list[str] = []
+        for entry in payload.get("files", []):
+            path = str(entry.get("path", "")).strip()
+            if path and path not in changed_files:
+                changed_files.append(path)
+        return changed_files
 
 
 RuntimeOrchestrator = Orchestrator
