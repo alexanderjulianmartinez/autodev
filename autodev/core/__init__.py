@@ -3,6 +3,7 @@
 from autodev.core.backlog_service import BacklogService
 from autodev.core.failure_classifier import classify_phase_failure
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseExecutionResult, PhaseRegistry
+from autodev.core.run_reporter import RunReporter
 from autodev.core.runtime import Orchestrator, PipelineState
 from autodev.core.schemas import (
     BacklogItem,
@@ -49,6 +50,7 @@ __all__ = [
     "ReviewDecision",
     "ReviewResult",
     "RunMetadata",
+    "RunReporter",
     "RunStatus",
     "TaskGraph",
     "TaskMaterializer",

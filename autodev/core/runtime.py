@@ -20,6 +20,7 @@ from autodev.agents.base import AgentContext
 from autodev.agents.debugger import DebuggerAgent
 from autodev.core.failure_classifier import classify_phase_failure
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseRegistry
+from autodev.core.run_reporter import RunReporter
 from autodev.core.schemas import (
     FailureDetail,
     IsolationMode,
@@ -267,6 +268,16 @@ class Orchestrator:
                         )
                     except Exception:
                         logger.exception("Failed to persist finalize error for run %s", run_id)
+                try:
+                    RunReporter(self.state_store).write(
+                        run_id,
+                        status=final_run_status,
+                        stage_outputs=dict(self._stage_outputs),
+                        context_metadata=dict(context.metadata),
+                        files_modified=[str(p) for p in context.files_modified],
+                    )
+                except Exception:
+                    logger.exception("RunReporter failed for run %s", run_id)
 
     # ------------------------------------------------------------------
     # Private stage helpers

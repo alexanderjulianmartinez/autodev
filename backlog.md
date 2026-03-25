@@ -339,6 +339,8 @@ The biggest gaps are:
   - each run produces a summary artifact
   - failure history and validation history are discoverable from disk
   - artifact paths are stable enough for future UI work
+- **Status:** `completed`
+- **Completion notes:** Implemented `RunReporter` in `autodev/core/run_reporter.py`. Each run writes `runs/{run_id}/summary.json` and `runs/{run_id}/summary.md`. Validation results are appended to `reports/validation-history.json` after every run; failure stage outputs are appended to `reports/failure-history.json` on failed runs. `RunReporter` is wired into the `Orchestrator.run_pipeline()` finally block. 14 tests added in `tests/test_run_reporter.py`.
 
 ### AD-024 Implement `fix-ci` as a real intake and repair workflow
 
