@@ -318,8 +318,10 @@ The biggest gaps are:
 
 ### AD-022 Add CLI commands for backlog and run management
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:cli`
+- **Completion notes:** added `backlog add` and `backlog list` sub-commands (title slug as item ID, priority/label/criterion flags, status filter) and `run start`, `run resume`, and `runs show` commands to [autodev/cli/main.py](autodev/cli/main.py), with `resume_pipeline(run_id)` added to [autodev/core/runtime.py](autodev/core/runtime.py) to load persisted run metadata and re-execute the pipeline; all commands share a stable default state dir (`~/.autodev/state`) and accept `--work-dir` for override; covered by [tests/test_cli.py](tests/test_cli.py).
 - **Problem:** The CLI exposes `init`, `run`, `fix-ci`, and `status`, but not the durable runtime concepts from the design.
 - **Scope:** Add commands such as `backlog add`, `backlog list`, `run start`, `run resume`, and `runs show`.
 - **Acceptance criteria:**

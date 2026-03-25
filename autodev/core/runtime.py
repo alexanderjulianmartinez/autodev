@@ -102,8 +102,31 @@ class Orchestrator:
         return current_context
 
     # ------------------------------------------------------------------
-    # Main entry point
+    # Main entry points
     # ------------------------------------------------------------------
+
+    def resume_pipeline(self, run_id: str) -> AgentContext:
+        """Resume an interrupted run by re-executing its pipeline.
+
+        Loads persisted run metadata to recover the original issue URL, then
+        delegates to :meth:`run_pipeline`.  If the run is already completed the
+        pipeline is re-executed so the caller can produce fresh artifacts.
+
+        Raises
+        ------
+        FileNotFoundError
+            If *run_id* does not correspond to a persisted run.
+        ValueError
+            If the persisted run has no ``issue_url`` in its metadata.
+        """
+        run = self.state_store.load_run(run_id)
+        issue_url = str(run.metadata.get("issue_url", "")).strip()
+        if not issue_url:
+            raise ValueError(
+                f"Run {run_id!r} has no issue_url in its persisted metadata and cannot be resumed."
+            )
+        logger.info("Resuming run %r for issue %s", run_id, issue_url)
+        return self.run_pipeline(issue_url)
 
     def run_pipeline(self, issue_url: str) -> AgentContext:
         """Execute the full issue → plan → implement → validate → review → PR pipeline."""
