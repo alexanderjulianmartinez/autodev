@@ -305,8 +305,10 @@ The biggest gaps are:
 
 ### AD-021 Expand issue intake into backlog-item creation
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:github`
+- **Completion notes:** added [autodev/github/issue_intake.py](autodev/github/issue_intake.py) with `IssueIntakeService` that normalizes a GitHub issue into a durable `BacklogItem` — parsing checkbox acceptance criteria, mapping priority labels (`priority:p0`–`p3`), preserving labels and repo metadata, and making re-intake idempotent; updated [autodev/core/runtime.py](autodev/core/runtime.py) so `_read_issue()` persists via `IssueIntakeService` and threads `backlog_item_id` into context, covered by [tests/test_github.py](tests/test_github.py).
 - **Problem:** GitHub issues are currently read directly into transient runtime context.
 - **Scope:** Convert issue intake into backlog item creation with normalized title, description, labels, and acceptance criteria.
 - **Acceptance criteria:**

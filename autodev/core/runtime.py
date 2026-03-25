@@ -34,7 +34,7 @@ from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskScheduler
 from autodev.core.workspace_manager import WorkspaceManager
-from autodev.github.issue_reader import IssueReader
+from autodev.github.issue_intake import IssueIntakeService
 from autodev.github.pr_creator import PRCreator
 from autodev.github.repo_cloner import RepoCloner
 from autodev.models.router import ModelRouter
@@ -395,12 +395,13 @@ class Orchestrator:
 
     def _read_issue(self, context: AgentContext) -> AgentContext:
         try:
-            reader = IssueReader()
-            issue = reader.read(context.issue_url)
+            intake = IssueIntakeService(self.backlog_service)
+            item = intake.intake(context.issue_url)
             meta = dict(context.metadata)
-            meta["issue_title"] = issue.title
-            meta["issue_body"] = issue.body
-            meta["repo_full_name"] = issue.repo_full_name
+            meta["issue_title"] = item.title
+            meta["issue_body"] = item.description
+            meta["repo_full_name"] = item.metadata.get("repo_full_name", "")
+            meta["backlog_item_id"] = item.item_id
             return context.model_copy(update={"metadata": meta})
         except Exception as exc:
             logger.warning("Could not read issue (%s); continuing without it.", exc)
