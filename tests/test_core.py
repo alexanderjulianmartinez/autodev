@@ -897,6 +897,7 @@ class TestOrchestrator:
                 "repo_full_name": "octocat/Hello-World",
                 "issue_title": "Use branch",
                 "isolation_branch": "autodev/issue-14-run",
+                "review_decision": "approved",
             }
         )
 

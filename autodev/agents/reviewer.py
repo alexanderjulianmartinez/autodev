@@ -65,10 +65,10 @@ class ReviewerAgent(Agent):
 
         meta = dict(context.metadata)
 
-        checks = self._review_checks(context)
-        decision = self._decide_review(checks)
         policy_gate_failures = self._policy_gate_failures(context)
         secret_exposure_findings = self._secret_exposure_findings(context)
+        checks = self._review_checks(context, policy_gate_failures, secret_exposure_findings)
+        decision = self._decide_review(checks)
         blocking_reasons = self._blocking_reasons(
             checks,
             decision,
@@ -88,12 +88,15 @@ class ReviewerAgent(Agent):
         logger.info("ReviewerAgent decision: %s", decision.value)
         return context.model_copy(update={"metadata": meta})
 
-    def _review_checks(self, context: AgentContext) -> dict[str, bool]:
+    def _review_checks(
+        self,
+        context: AgentContext,
+        policy_gate_failures: list[str],
+        secret_exposure_findings: list[dict[str, Any]],
+    ) -> dict[str, bool]:
         metadata = context.metadata
         requires_human_approval = self._metadata_flag(metadata, "requires_human_approval")
         human_approval_recorded = self._metadata_flag(metadata, "human_approval_recorded")
-        policy_gate_failures = self._policy_gate_failures(context)
-        secret_exposure_findings = self._secret_exposure_findings(context)
         return {
             "diff_present": self._diff_present(context),
             "validation_passed": self._validation_passed(context),

@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 import tempfile
 from enum import Enum
 from pathlib import Path
@@ -854,24 +853,10 @@ class Orchestrator:
         return self._run_git(repo_path, args)
 
     def _run_git(self, repo_path: str, args: list[str]) -> str:
-        try:
-            completed = subprocess.run(
-                ["git", "-C", repo_path, *args],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        except FileNotFoundError as exc:
-            raise RuntimeError("git executable is not available") from exc
-        if completed.returncode != 0:
-            error = completed.stderr.strip() or completed.stdout.strip() or "git failed"
-            raise RuntimeError(error)
-        return completed.stdout
+        return self.workspace_manager.git_tool.run_git(["-C", repo_path, *args])
 
     def _review_allows_promotion(self, context: AgentContext) -> bool:
         decision = str(context.metadata.get("review_decision", "")).strip()
-        if not decision:
-            return True
         return decision == ReviewDecision.APPROVED.value
 
     def _promotion_blocked_message(self, context: AgentContext) -> str:

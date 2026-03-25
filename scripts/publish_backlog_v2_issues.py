@@ -126,9 +126,10 @@ def parse_backlog(path: Path) -> list[IssueDraft]:
 
             metadata_match = METADATA_RE.match(current_line)
             if metadata_match:
-                metadata[metadata_match.group("name").strip().lower()] = (
-                    metadata_match.group("value").strip().strip("`")
-                )
+                value = metadata_match.group("value").strip()
+                if len(value) >= 2 and value[0] == "`" and value[-1] == "`":
+                    value = value[1:-1]
+                metadata[metadata_match.group("name").strip().lower()] = value
                 index += 1
                 continue
 
