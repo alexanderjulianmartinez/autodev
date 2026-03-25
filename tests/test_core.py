@@ -1,12 +1,16 @@
 """Tests for core components: TaskGraph, Supervisor, unified Orchestrator."""
 
+import json
+import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from autodev.agents.base import AgentContext
+from autodev.core.phase_registry import PhaseExecutionPayload, PhaseExecutionResult, PhaseRegistry
 from autodev.core.runtime import Orchestrator, PipelineState
-from autodev.core.schemas import IsolationMode, RunStatus
+from autodev.core.schemas import IsolationMode, PhaseName, RunStatus, TaskStatus
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskNode
 
@@ -82,6 +86,239 @@ class TestSupervisor:
 
 
 class TestOrchestrator:
+    def test_phase_registry_registers_handlers_for_default_phases(self):
+        registry = PhaseRegistry.default()
+
+        assert set(registry.phases) == {
+            PhaseName.PLAN,
+            PhaseName.IMPLEMENT,
+            PhaseName.VALIDATE,
+            PhaseName.REVIEW,
+            PhaseName.PROMOTE,
+        }
+
+    def test_phase_registry_execution_sets_boundary_timestamps(self, monkeypatch):
+        registry = PhaseRegistry()
+        timestamp_values = iter(
+            [
+                datetime(2026, 3, 25, 12, 0, 0, tzinfo=timezone.utc),
+                datetime(2026, 3, 25, 12, 0, 1, tzinfo=timezone.utc),
+            ]
+        )
+
+        class TimestampHandler:
+            def execute(self, payload: PhaseExecutionPayload) -> PhaseExecutionResult:
+                return PhaseExecutionResult(
+                    phase=payload.phase,
+                    task_id=payload.task_id,
+                    status=TaskStatus.COMPLETED,
+                    message="ok",
+                    context=payload.to_context(),
+                    started_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+                    completed_at=datetime(2000, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=1),
+                )
+
+        registry.register(PhaseName.PLAN, TimestampHandler())
+        monkeypatch.setattr(
+            "autodev.core.phase_registry.utc_now",
+            lambda: next(timestamp_values),
+        )
+
+        result = registry.execute(
+            PhaseExecutionPayload(
+                phase=PhaseName.PLAN,
+                task_id="run-1-plan",
+            )
+        )
+
+        assert result.started_at == datetime(2026, 3, 25, 12, 0, 0, tzinfo=timezone.utc)
+        assert result.completed_at == datetime(2026, 3, 25, 12, 0, 1, tzinfo=timezone.utc)
+
+    def test_plan_phase_can_be_swapped_via_registry(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+
+        class CustomPlanHandler:
+            def execute(self, payload: PhaseExecutionPayload) -> PhaseExecutionResult:
+                updated = payload.to_context().model_copy(update={"plan": ["1. custom plan"]})
+                return PhaseExecutionResult(
+                    phase=payload.phase,
+                    task_id=payload.task_id,
+                    status=TaskStatus.COMPLETED,
+                    message="custom planner",
+                    artifacts=["plan.md"],
+                    metrics={"plan_steps": 1},
+                    context=updated,
+                )
+
+        orch.register_phase_handler(PhaseName.PLAN, CustomPlanHandler())
+
+        updated = orch._plan(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/12")
+        )
+
+        assert updated.plan == ["1. custom plan"]
+        assert orch.stage_outputs["plan"] == {
+            "status": "completed",
+            "message": "custom planner",
+            "artifacts": ["plan.md"],
+            "metrics": {"plan_steps": 1},
+        }
+
+    def test_plan_persists_repository_aware_planning_artifact(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        context = AgentContext(
+            issue_url="https://github.com/octocat/Hello-World/issues/15",
+            metadata={
+                "issue_title": "Add token validation to auth flow",
+                "issue_body": (
+                    "Acceptance criteria:\n- reject invalid tokens\n- preserve valid sessions\n"
+                ),
+            },
+        )
+
+        started = orch._start_run(context)
+        workspace = Path(started.repo_path)
+        (workspace / "auth.py").write_text(
+            "def validate_token(token):\n    return bool(token)\n",
+            encoding="utf-8",
+        )
+        tests_dir = workspace / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_auth.py").write_text(
+            "def test_validate_token():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+        updated = orch._plan(started)
+        artifact_path = Path(updated.metadata["planning_artifact_path"])
+        artifact_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+        run = orch.state_store.load_run(updated.metadata["run_id"])
+
+        assert artifact_path.exists()
+        assert artifact_payload["planning_mode"] == "repository-aware"
+        assert any(path.endswith("auth.py") for path in artifact_payload["likely_target_files"])
+        assert artifact_payload["acceptance_criteria"] == [
+            "reject invalid tokens",
+            "preserve valid sessions",
+        ]
+        assert run.metadata["planning_artifact_path"] == str(artifact_path)
+        assert str(artifact_path) in orch.stage_outputs["plan"]["artifacts"]
+
+    def test_implement_uses_diff_output_for_changed_files(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(
+                issue_url="https://github.com/octocat/Hello-World/issues/16",
+                metadata={"issue_title": "Update README implementation note"},
+            )
+        )
+        workspace = Path(started.repo_path)
+        readme = workspace / "README.md"
+
+        subprocess.run(["git", "-C", str(workspace), "init"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(workspace), "config", "user.email", "autodev@example.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "config", "user.name", "AutoDev"],
+            check=True,
+            capture_output=True,
+        )
+        readme.write_text("# AutoDev\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(workspace), "add", "README.md"], check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "Initial"],
+            check=True,
+            capture_output=True,
+        )
+
+        implement_context = started.model_copy(
+            update={
+                "plan": ["1. Update README.md"],
+                "files_modified": ["heuristic.py"],
+                "metadata": {
+                    **started.metadata,
+                    "issue_title": "Update README implementation note",
+                    "likely_target_files": ["README.md"],
+                },
+            }
+        )
+
+        updated = orch._implement(implement_context)
+        changed_files_payload = json.loads(
+            Path(updated.metadata["changed_files_path"]).read_text(encoding="utf-8")
+        )
+
+        assert updated.files_modified == ["README.md"]
+        assert updated.metadata["implementation_change_summary"] == ["README.md"]
+        assert changed_files_payload["success"] is True
+        assert changed_files_payload["files"] == [{"path": "README.md", "status": "M"}]
+        assert "heuristic.py" not in updated.files_modified
+        assert (
+            str(updated.metadata["implementation_diff_path"])
+            in orch.stage_outputs["implement"]["artifacts"]
+        )
+
+    def test_validate_uses_orchestrator_work_dir_when_repo_path_is_missing(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        captured: dict[str, str] = {}
+
+        def fake_run(self, repo_path=".", test_command="pytest"):
+            captured["repo_path"] = repo_path
+            captured["test_command"] = test_command
+
+            class Result:
+                passed = True
+                output = "ok"
+                error = ""
+                return_code = 0
+
+            return Result()
+
+        monkeypatch.setattr("autodev.core.phase_registry.TestRunner.run", fake_run)
+
+        updated = orch._validate(AgentContext(repo_path=""))
+
+        assert captured["repo_path"] == str(tmp_path)
+        assert updated.validation_results.startswith("PASSED")
+
+    def test_implement_uses_fallback_files_modified_when_artifact_parse_fails(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/17")
+        )
+        changed_files_path = Path(started.repo_path) / "changed_files.json"
+        diff_path = Path(started.repo_path) / "working_tree.diff"
+        changed_files_path.write_text("not json", encoding="utf-8")
+        diff_path.write_text("diff --git a/README.md b/README.md\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            orch.workspace_manager,
+            "capture_implementation_artifacts",
+            lambda _run_id: {"diff": diff_path, "changed_files": changed_files_path},
+        )
+        monkeypatch.setattr(
+            orch,
+            "_execute_phase",
+            lambda _phase, _context: started.model_copy(
+                update={"files_modified": ["fallback.py"], "metadata": dict(started.metadata)}
+            ),
+        )
+
+        updated = orch._implement(started)
+
+        assert updated.files_modified == ["fallback.py"]
+        assert updated.metadata["implementation_change_summary"] == ["fallback.py"]
+        assert orch.stage_outputs["implement"]["metrics"]["files_modified"] == 1
+
     def test_execute_simple(self):
         orch = Orchestrator()
         pipeline = {"stages": [{"name": "plan"}, {"name": "implement"}]}

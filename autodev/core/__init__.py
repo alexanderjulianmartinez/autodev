@@ -1,6 +1,7 @@
 """Core AutoDev runtime components."""
 
 from autodev.core.backlog_service import BacklogService
+from autodev.core.phase_registry import PhaseExecutionPayload, PhaseExecutionResult, PhaseRegistry
 from autodev.core.runtime import Orchestrator, PipelineState
 from autodev.core.schemas import (
     BacklogItem,
@@ -37,6 +38,9 @@ __all__ = [
     "FileStateStore",
     "IsolationMode",
     "Orchestrator",
+    "PhaseExecutionPayload",
+    "PhaseExecutionResult",
+    "PhaseRegistry",
     "PipelineState",
     "PhaseName",
     "PriorityLevel",
