@@ -12,7 +12,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Optional
-from urllib import error, parse, request
+from urllib import error, request
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BACKLOG_PATH = REPO_ROOT / "backlog_v2.md"
@@ -61,15 +61,33 @@ class IssueDraft:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backlog", type=Path, default=DEFAULT_BACKLOG_PATH, help="Path to backlog markdown file")
-    parser.add_argument("--write-drafts", type=Path, default=DEFAULT_DRAFT_DIR, help="Directory for generated draft markdown files")
-    parser.add_argument("--write-json", type=Path, default=DEFAULT_JSON_PATH, help="Path for generated JSON payloads")
+    parser.add_argument(
+        "--backlog", type=Path, default=DEFAULT_BACKLOG_PATH, help="Path to backlog markdown file"
+    )
+    parser.add_argument(
+        "--write-drafts",
+        type=Path,
+        default=DEFAULT_DRAFT_DIR,
+        help="Directory for generated draft markdown files",
+    )
+    parser.add_argument(
+        "--write-json",
+        type=Path,
+        default=DEFAULT_JSON_PATH,
+        help="Path for generated JSON payloads",
+    )
     parser.add_argument("--publish", action="store_true", help="Create issues via GitHub REST API")
     parser.add_argument("--owner", help="GitHub repository owner; defaults to origin remote")
     parser.add_argument("--repo", help="GitHub repository name; defaults to origin remote")
     parser.add_argument("--token", help="GitHub token; defaults to GITHUB_TOKEN env var")
-    parser.add_argument("--apply-labels", action="store_true", help="Send suggested labels in the API request")
-    parser.add_argument("--skip-existing", action="store_true", help="Skip publishing issues whose title already exists")
+    parser.add_argument(
+        "--apply-labels", action="store_true", help="Send suggested labels in the API request"
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip publishing issues whose title already exists",
+    )
     return parser.parse_args()
 
 
@@ -108,7 +126,9 @@ def parse_backlog(path: Path) -> list[IssueDraft]:
 
             metadata_match = METADATA_RE.match(current_line)
             if metadata_match:
-                metadata[metadata_match.group("name").strip().lower()] = metadata_match.group("value").strip().strip("`")
+                metadata[metadata_match.group("name").strip().lower()] = (
+                    metadata_match.group("value").strip().strip("`")
+                )
                 index += 1
                 continue
 
@@ -223,7 +243,9 @@ def publish_issues(
             json_payload=request_payload,
         )
         data = json.loads(response)
-        published.append({"title": draft.github_title, "status": "created", "url": data.get("html_url")})
+        published.append(
+            {"title": draft.github_title, "status": "created", "url": data.get("html_url")}
+        )
 
     return published
 
@@ -252,7 +274,9 @@ def github_request(
             return response.read().decode("utf-8")
     except error.HTTPError as exc:
         details = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub API request failed ({exc.code} {exc.reason}): {details}") from exc
+        raise RuntimeError(
+            f"GitHub API request failed ({exc.code} {exc.reason}): {details}"
+        ) from exc
 
 
 def main() -> int:
