@@ -103,6 +103,7 @@ class TestValidationAndReviewSchemas:
         assert result.commands == []
         assert result.changed_files == []
         assert result.profiles == []
+        assert result.metadata == {}
         assert result.failure is None
 
     def test_review_result_requires_summary_and_decision(self):
@@ -148,6 +149,11 @@ class TestValidationAndReviewSchemas:
             ],
             changed_files=["autodev/core/schemas.py"],
             profiles=["pytest"],
+            metadata={
+                "validation_breadth": "targeted",
+                "stop_on_first_failure": True,
+                "selection_reason": "Strict targeted validation was inferred from changed files.",
+            },
             failure=FailureDetail(
                 failure_class=FailureClass.VALIDATION_FAILURE,
                 message="Schema validation tests failed",

@@ -174,6 +174,7 @@ class ValidationResult(AutoDevModel):
     commands: list[ValidationCommandResult] = Field(default_factory=list)
     changed_files: list[str] = Field(default_factory=list)
     profiles: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     failure: Optional[FailureDetail] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

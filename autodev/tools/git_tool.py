@@ -180,7 +180,8 @@ class GitTool(Tool):
             return repo_url.rsplit(":", maxsplit=1)[0].rsplit("@", maxsplit=1)[-1]
         return repo_url
 
-    def _run_git_command(self, args: list[str]) -> None:
+    def run_git(self, args: list[str]) -> str:
+        """Run a raw git command and return stdout; raises RuntimeError with sanitized output."""
         try:
             completed = subprocess.run(
                 ["git", *args],
@@ -195,3 +196,7 @@ class GitTool(Tool):
                 completed.stderr.strip() or completed.stdout.strip() or "git failed"
             )
             raise RuntimeError(error)
+        return completed.stdout
+
+    def _run_git_command(self, args: list[str]) -> None:
+        self.run_git(args)

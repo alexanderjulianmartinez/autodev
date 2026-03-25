@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from autodev.core.schemas import ValidationCommandResult, ValidationStatus
 from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.tools.filesystem_tool import FilesystemTool
@@ -220,6 +221,109 @@ class TestTestRunner:
         assert not result.passed
         assert "Blocked:" in result.error
         assert store.load_report_entries("guardrails")[-1]["operation"] == "test_command"
+
+    def test_run_validation_uses_explicit_commands_when_provided(self, tmp_path):
+        runner = TestRunner()
+        test_file = tmp_path / "test_sample.py"
+        test_file.write_text("def test_pass():\n    assert 1 == 1\n", encoding="utf-8")
+
+        result = runner.run_validation(
+            repo_path=str(tmp_path),
+            task_id="validate-explicit",
+            explicit_commands=["pytest test_sample.py -q"],
+        )
+
+        assert result.status == ValidationStatus.PASSED
+        assert result.profiles == ["explicit"]
+        assert result.commands[0].command == "pytest test_sample.py -q"
+
+    def test_run_validation_derives_targeted_pytest_from_changed_files(self, tmp_path):
+        runner = TestRunner()
+        source_file = tmp_path / "auth.py"
+        source_file.write_text(
+            "def validate_token(token):\n    return bool(token)\n",
+            encoding="utf-8",
+        )
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_auth.py").write_text(
+            "def test_validate_token():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+        commands, profiles, reason = runner.plan_validation(
+            repo_path=str(tmp_path),
+            changed_files=["auth.py"],
+        )
+
+        assert profiles == ["changed-file-targeted", "targeted"]
+        assert commands == ["pytest tests/test_auth.py -v"]
+        assert "strict targeted validation" in reason.lower()
+
+    def test_plan_validation_broader_fallback_adds_project_default(self, tmp_path):
+        runner = TestRunner()
+        source_file = tmp_path / "auth.py"
+        source_file.write_text(
+            "def validate_token(token):\n    return bool(token)\n",
+            encoding="utf-8",
+        )
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_auth.py").write_text(
+            "def test_validate_token():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+        commands, profiles, reason = runner.plan_validation(
+            repo_path=str(tmp_path),
+            changed_files=["auth.py"],
+            validation_breadth="broader-fallback",
+        )
+
+        assert commands == ["pytest tests/test_auth.py -v", "pytest -q"]
+        assert profiles == ["changed-file-targeted", "broader-fallback"]
+        assert "broader fallback" in reason.lower()
+
+    def test_run_validation_continue_on_error_executes_all_commands(self, monkeypatch):
+        runner = TestRunner()
+        command_results = iter(
+            [
+                ValidationCommandResult(
+                    command="cmd1",
+                    exit_code=1,
+                    status=ValidationStatus.FAILED,
+                    stdout="",
+                    stderr="first failed",
+                    duration_seconds=0.01,
+                ),
+                ValidationCommandResult(
+                    command="cmd2",
+                    exit_code=0,
+                    status=ValidationStatus.PASSED,
+                    stdout="ok",
+                    stderr="",
+                    duration_seconds=0.01,
+                ),
+            ]
+        )
+
+        monkeypatch.setattr(
+            runner,
+            "_run_validation_command",
+            lambda **_kwargs: next(command_results),
+        )
+
+        result = runner.run_validation(
+            repo_path=".",
+            task_id="validate-continue",
+            explicit_commands=["cmd1", "cmd2"],
+            stop_on_first_failure=False,
+        )
+
+        assert len(result.commands) == 2
+        assert result.status == ValidationStatus.FAILED
+        assert result.metadata["stop_on_first_failure"] is False
+        assert result.summary == "Validation failed after executing 2 command(s)."
 
 
 class TestGitTool:

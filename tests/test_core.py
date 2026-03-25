@@ -10,7 +10,20 @@ import pytest
 from autodev.agents.base import AgentContext
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseExecutionResult, PhaseRegistry
 from autodev.core.runtime import Orchestrator, PipelineState
-from autodev.core.schemas import IsolationMode, PhaseName, RunStatus, TaskStatus
+from autodev.core.schemas import (
+    BacklogItem,
+    FailureClass,
+    IsolationMode,
+    PhaseName,
+    ReviewDecision,
+    ReviewResult,
+    RunStatus,
+    TaskRecord,
+    TaskStatus,
+    ValidationCommandResult,
+    ValidationResult,
+    ValidationStatus,
+)
 from autodev.core.supervisor import Supervisor
 from autodev.core.task_graph import TaskGraph, TaskNode
 
@@ -269,24 +282,459 @@ class TestOrchestrator:
         orch = Orchestrator(work_dir=str(tmp_path))
         captured: dict[str, str] = {}
 
-        def fake_run(self, repo_path=".", test_command="pytest"):
+        def fake_run_validation(
+            self,
+            repo_path=".",
+            *,
+            task_id,
+            changed_files=None,
+            explicit_commands=None,
+            validation_breadth="targeted",
+            stop_on_first_failure=True,
+        ):
             captured["repo_path"] = repo_path
-            captured["test_command"] = test_command
+            captured["task_id"] = task_id
+            captured["changed_files"] = list(changed_files or [])
+            captured["explicit_commands"] = list(explicit_commands or [])
+            captured["validation_breadth"] = validation_breadth
+            captured["stop_on_first_failure"] = stop_on_first_failure
+            return ValidationResult(
+                task_id=task_id,
+                status=ValidationStatus.PASSED,
+                summary="Validation passed for 1 command(s).",
+                commands=[
+                    ValidationCommandResult(
+                        command="pytest -q",
+                        exit_code=0,
+                        status=ValidationStatus.PASSED,
+                        stdout="ok\n",
+                        stderr="",
+                        duration_seconds=0.01,
+                    )
+                ],
+                changed_files=[],
+                profiles=["python"],
+                metadata={
+                    "validation_breadth": validation_breadth,
+                    "stop_on_first_failure": stop_on_first_failure,
+                    "selection_reason": "python default validation was selected.",
+                },
+            )
 
-            class Result:
-                passed = True
-                output = "ok"
-                error = ""
-                return_code = 0
-
-            return Result()
-
-        monkeypatch.setattr("autodev.core.phase_registry.TestRunner.run", fake_run)
+        monkeypatch.setattr(
+            "autodev.core.phase_registry.TestRunner.run_validation",
+            fake_run_validation,
+        )
 
         updated = orch._validate(AgentContext(repo_path=""))
 
         assert captured["repo_path"] == str(tmp_path)
+        assert captured["validation_breadth"] == "targeted"
+        assert captured["stop_on_first_failure"] is True
         assert updated.validation_results.startswith("PASSED")
+
+    def test_validate_uses_backlog_explicit_commands_and_persists_result(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        backlog_item = BacklogItem(
+            item_id="AD-015-item",
+            title="Validate auth change",
+            metadata={"validation_commands": ["pytest tests/test_auth.py -q"]},
+        )
+        orch.state_store.save_backlog_item(backlog_item)
+        started = orch._start_run(
+            AgentContext(
+                issue_url="https://github.com/octocat/Hello-World/issues/18",
+                metadata={"backlog_item_id": backlog_item.item_id},
+            )
+        )
+        captured: dict[str, object] = {}
+
+        def fake_run_validation(
+            self,
+            repo_path=".",
+            *,
+            task_id,
+            changed_files=None,
+            explicit_commands=None,
+            validation_breadth="targeted",
+            stop_on_first_failure=True,
+        ):
+            captured["repo_path"] = repo_path
+            captured["task_id"] = task_id
+            captured["changed_files"] = list(changed_files or [])
+            captured["explicit_commands"] = list(explicit_commands or [])
+            captured["validation_breadth"] = validation_breadth
+            captured["stop_on_first_failure"] = stop_on_first_failure
+            return ValidationResult(
+                task_id=task_id,
+                status=ValidationStatus.PASSED,
+                summary="Validation passed for 1 command(s).",
+                commands=[
+                    ValidationCommandResult(
+                        command="pytest tests/test_auth.py -q",
+                        exit_code=0,
+                        status=ValidationStatus.PASSED,
+                        stdout="ok\n",
+                        stderr="",
+                        duration_seconds=0.1,
+                    )
+                ],
+                changed_files=list(changed_files or []),
+                profiles=["explicit"],
+                metadata={
+                    "validation_breadth": validation_breadth,
+                    "stop_on_first_failure": stop_on_first_failure,
+                    "selection_reason": "Explicit validation commands were provided.",
+                },
+            )
+
+        monkeypatch.setattr(
+            "autodev.core.phase_registry.TestRunner.run_validation",
+            fake_run_validation,
+        )
+
+        updated = orch._validate(started.model_copy(update={"files_modified": ["auth.py"]}))
+        validation_path = Path(updated.metadata["validation_result_path"])
+        persisted = orch.state_store.load_validation_result(
+            updated.metadata["run_id"],
+            f"{updated.metadata['run_id']}-validate",
+        )
+
+        assert captured["repo_path"] == started.repo_path
+        assert captured["changed_files"] == ["auth.py"]
+        assert captured["explicit_commands"] == ["pytest tests/test_auth.py -q"]
+        assert captured["validation_breadth"] == "targeted"
+        assert captured["stop_on_first_failure"] is True
+        assert validation_path.exists()
+        assert persisted.status == ValidationStatus.PASSED
+        assert persisted.commands[0].command == "pytest tests/test_auth.py -q"
+        assert str(validation_path) in orch.stage_outputs["validate"]["artifacts"]
+        assert updated.metadata["validation_profiles"] == ["explicit"]
+
+    def test_validate_uses_backlog_validation_policy_and_surfaces_reason(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        backlog_item = BacklogItem(
+            item_id="AD-017-item",
+            title="Validate with broader fallback",
+            metadata={
+                "validation_breadth": "broader-fallback",
+                "validation_continue_on_error": True,
+            },
+        )
+        orch.state_store.save_backlog_item(backlog_item)
+        started = orch._start_run(
+            AgentContext(
+                issue_url="https://github.com/octocat/Hello-World/issues/23",
+                metadata={"backlog_item_id": backlog_item.item_id},
+            )
+        )
+        captured: dict[str, object] = {}
+
+        def fake_run_validation(
+            self,
+            repo_path=".",
+            *,
+            task_id,
+            changed_files=None,
+            explicit_commands=None,
+            validation_breadth="targeted",
+            stop_on_first_failure=True,
+        ):
+            captured["validation_breadth"] = validation_breadth
+            captured["stop_on_first_failure"] = stop_on_first_failure
+            return ValidationResult(
+                task_id=task_id,
+                status=ValidationStatus.PASSED,
+                summary="Validation passed for 2 command(s).",
+                commands=[
+                    ValidationCommandResult(
+                        command="pytest tests/test_auth.py -v",
+                        exit_code=0,
+                        status=ValidationStatus.PASSED,
+                        stdout="ok\n",
+                        stderr="",
+                        duration_seconds=0.05,
+                    ),
+                    ValidationCommandResult(
+                        command="pytest -q",
+                        exit_code=0,
+                        status=ValidationStatus.PASSED,
+                        stdout="ok\n",
+                        stderr="",
+                        duration_seconds=0.05,
+                    ),
+                ],
+                changed_files=list(changed_files or []),
+                profiles=["changed-file-targeted", "broader-fallback"],
+                metadata={
+                    "validation_breadth": validation_breadth,
+                    "stop_on_first_failure": stop_on_first_failure,
+                    "selection_reason": (
+                        "Targeted tests were inferred from changed files and broader "
+                        "fallback validation was added."
+                    ),
+                },
+            )
+
+        monkeypatch.setattr(
+            "autodev.core.phase_registry.TestRunner.run_validation",
+            fake_run_validation,
+        )
+
+        updated = orch._validate(started.model_copy(update={"files_modified": ["auth.py"]}))
+
+        assert captured["validation_breadth"] == "broader-fallback"
+        assert captured["stop_on_first_failure"] is False
+        assert updated.metadata["validation_breadth"] == "broader-fallback"
+        assert updated.metadata["validation_stop_on_first_failure"] is False
+        assert (
+            "broader fallback validation was added"
+            in updated.metadata["validation_selection_reason"].lower()
+        )
+        assert "Policy: breadth=broader-fallback, stop_on_first_failure=False" in (
+            updated.validation_results
+        )
+
+    def test_validate_failure_persists_failure_class_and_blocks_durable_task(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/21")
+        )
+        durable_task = TaskRecord(
+            task_id="issue-21__validate",
+            backlog_item_id="issue-21",
+            phase=PhaseName.VALIDATE,
+            max_retries=2,
+        )
+        orch.state_store.save_task(durable_task)
+
+        def fake_run_validation(
+            self,
+            repo_path=".",
+            *,
+            task_id,
+            changed_files=None,
+            explicit_commands=None,
+            validation_breadth="targeted",
+            stop_on_first_failure=True,
+        ):
+            return ValidationResult(
+                task_id=task_id,
+                status=ValidationStatus.FAILED,
+                summary="Validation failed after 1 command(s).",
+                commands=[
+                    ValidationCommandResult(
+                        command="pytest tests/test_auth.py -q",
+                        exit_code=1,
+                        status=ValidationStatus.FAILED,
+                        stdout="",
+                        stderr="assertion failed",
+                        duration_seconds=0.1,
+                    )
+                ],
+                changed_files=list(changed_files or []),
+                profiles=["explicit"],
+                metadata={
+                    "validation_breadth": validation_breadth,
+                    "stop_on_first_failure": stop_on_first_failure,
+                    "selection_reason": "Explicit validation commands were provided.",
+                },
+            )
+
+        monkeypatch.setattr(
+            "autodev.core.phase_registry.TestRunner.run_validation",
+            fake_run_validation,
+        )
+
+        updated = orch._validate(started.model_copy(update={"files_modified": ["auth.py"]}))
+        run_id = updated.metadata["run_id"]
+        task_result = orch.state_store.load_task_result(run_id, f"{run_id}-validate")
+        task = orch.state_store.load_task("issue-21__validate")
+        persisted_validation = orch.state_store.load_validation_result(run_id, f"{run_id}-validate")
+
+        assert task_result.failure is not None
+        assert task_result.failure.failure_class == FailureClass.VALIDATION_FAILURE
+        assert persisted_validation.failure is not None
+        assert persisted_validation.failure.failure_class == FailureClass.VALIDATION_FAILURE
+        assert task.status == TaskStatus.BLOCKED
+        assert task.last_failure is not None
+        assert task.last_failure.failure_class == FailureClass.VALIDATION_FAILURE
+        assert orch.stage_outputs["validate"]["failure_class"] == "validation_failure"
+
+    def test_retryable_phase_exception_schedules_durable_task_retry(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/22")
+        )
+        durable_task = TaskRecord(
+            task_id="issue-22__plan",
+            backlog_item_id="issue-22",
+            phase=PhaseName.PLAN,
+            max_retries=2,
+        )
+        orch.state_store.save_task(durable_task)
+
+        class TimeoutPlanHandler:
+            def execute(self, payload: PhaseExecutionPayload) -> PhaseExecutionResult:
+                raise TimeoutError("model request timed out")
+
+        orch.register_phase_handler(PhaseName.PLAN, TimeoutPlanHandler())
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            orch._plan(started)
+
+        run_id = started.metadata["run_id"]
+        task_result = orch.state_store.load_task_result(run_id, f"{run_id}-plan")
+        task = orch.state_store.load_task("issue-22__plan")
+
+        assert task_result.failure is not None
+        assert task_result.failure.failure_class == FailureClass.RETRYABLE
+        assert task.status == TaskStatus.PENDING
+        assert task.retry_count == 1
+        assert task.next_eligible_at is not None
+        assert orch.stage_outputs["plan"]["failure_class"] == "retryable"
+
+    def test_review_persists_structured_review_result(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/24")
+        )
+        diff_path = Path(started.repo_path) / "working_tree.diff"
+        diff_path.write_text("diff --git a/auth.py b/auth.py\n+fix\n", encoding="utf-8")
+
+        review_context = started.model_copy(
+            update={
+                "files_modified": ["auth.py"],
+                "validation_results": "PASSED\n\n$ pytest tests/test_auth.py -q\nexit_code=0",
+                "metadata": {
+                    **started.metadata,
+                    "implementation_diff_path": str(diff_path),
+                    "acceptance_criteria": ["reject invalid tokens"],
+                },
+            }
+        )
+
+        updated = orch._review(review_context)
+        review_path = Path(updated.metadata["review_result_path"])
+        persisted = orch.state_store.load_review_result(
+            updated.metadata["run_id"],
+            f"{updated.metadata['run_id']}-review",
+        )
+
+        assert updated.metadata["review_decision"] == ReviewDecision.APPROVED.value
+        assert updated.metadata["review_passed"] is True
+        assert review_path.exists()
+        assert persisted == ReviewResult(
+            task_id=f"{updated.metadata['run_id']}-review",
+            decision=ReviewDecision.APPROVED,
+            summary=updated.metadata["review_summary"],
+            checks=updated.metadata["review_checks"],
+            blocking_reasons=[],
+            metadata={
+                "files_modified": ["auth.py"],
+                "implementation_diff_path": str(diff_path),
+                "validation_result_path": "",
+                "acceptance_criteria": ["reject invalid tokens"],
+                "policy_gate_failures": [],
+                "secret_exposure_findings": [],
+            },
+            reviewed_at=persisted.reviewed_at,
+        )
+        assert orch.stage_outputs["review"]["metrics"]["review_decision"] == "approved"
+
+    def test_review_blocks_secret_exposure_as_policy_failure(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/26")
+        )
+        secret_file = Path(started.repo_path) / "secrets.py"
+        secret_file.write_text('TOKEN = "ghp_supersecretvalue12345"\n', encoding="utf-8")
+        diff_path = Path(started.repo_path) / "working_tree.diff"
+        diff_path.write_text(
+            'diff --git a/secrets.py b/secrets.py\n+TOKEN = "ghp_supersecretvalue12345"\n',
+            encoding="utf-8",
+        )
+
+        review_context = started.model_copy(
+            update={
+                "files_modified": ["secrets.py"],
+                "validation_results": "PASSED\n\n$ pytest -q\nexit_code=0",
+                "metadata": {
+                    **started.metadata,
+                    "implementation_diff_path": str(diff_path),
+                    "acceptance_criteria": ["do not commit live secrets"],
+                },
+            }
+        )
+
+        updated = orch._review(review_context)
+        persisted = orch.state_store.load_review_result(
+            updated.metadata["run_id"],
+            f"{updated.metadata['run_id']}-review",
+        )
+
+        assert updated.metadata["review_decision"] == ReviewDecision.BLOCKED.value
+        assert updated.metadata["review_checks"]["secret_exposure_clear"] is False
+        assert updated.metadata["secret_exposure_findings"][0]["detector"] == "github_token"
+        assert (
+            "ghp_supersecretvalue12345"
+            not in updated.metadata["secret_exposure_findings"][0]["preview"]
+        )
+        assert (
+            persisted.metadata["secret_exposure_findings"]
+            == updated.metadata["secret_exposure_findings"]
+        )
+        assert orch.stage_outputs["review"]["failure_class"] == FailureClass.POLICY_FAILURE.value
+        assert orch.stage_outputs["review"]["metrics"]["review_decision"] == "blocked"
+
+    def test_run_pipeline_blocks_promotion_when_review_not_approved(self, tmp_path, monkeypatch):
+        orch = Orchestrator(work_dir=str(tmp_path), dry_run=False)
+        opened = {"called": False}
+
+        monkeypatch.setattr(orch, "_read_issue", lambda context: context)
+        monkeypatch.setattr(
+            orch,
+            "_plan",
+            lambda context: context.model_copy(update={"plan": ["1. ok"]}),
+        )
+        monkeypatch.setattr(orch, "_implement", lambda context: context)
+        monkeypatch.setattr(
+            orch,
+            "_validate",
+            lambda context: context.model_copy(update={"validation_results": "FAILED"}),
+        )
+        monkeypatch.setattr(
+            orch,
+            "_review",
+            lambda context: context.model_copy(
+                update={
+                    "metadata": {
+                        **context.metadata,
+                        "review_decision": ReviewDecision.CHANGES_REQUESTED.value,
+                        "review_summary": "Review requested changes: validation did not pass.",
+                    }
+                }
+            ),
+        )
+
+        def fake_open_pr(context):
+            opened["called"] = True
+            return context
+
+        monkeypatch.setattr(orch, "_open_pr", fake_open_pr)
+
+        context = orch.run_pipeline("https://github.com/octocat/Hello-World/issues/25")
+
+        assert opened["called"] is False
+        assert context.metadata["review_decision"] == ReviewDecision.CHANGES_REQUESTED.value
+        assert orch.stage_outputs["promote"]["status"] == "blocked"
+        assert "changes_requested" in orch.stage_outputs["promote"]["message"]
 
     def test_implement_uses_fallback_files_modified_when_artifact_parse_fails(
         self, tmp_path, monkeypatch
@@ -449,6 +897,7 @@ class TestOrchestrator:
                 "repo_full_name": "octocat/Hello-World",
                 "issue_title": "Use branch",
                 "isolation_branch": "autodev/issue-14-run",
+                "review_decision": "approved",
             }
         )
 
@@ -456,6 +905,155 @@ class TestOrchestrator:
 
         assert created["branch_name"] == "autodev/issue-14-run"
         assert updated.metadata["pr_url"] == "https://example.com/pr/1"
+
+    def test_promote_patch_bundle_persists_metadata(self, tmp_path):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/27")
+        )
+        diff_path = Path(started.repo_path) / "working_tree.diff"
+        diff_path.write_text("diff --git a/app.py b/app.py\n+print('ok')\n", encoding="utf-8")
+        context = started.model_copy(
+            update={
+                "files_modified": ["app.py"],
+                "metadata": {
+                    **started.metadata,
+                    "review_decision": ReviewDecision.APPROVED.value,
+                    "review_summary": "Review approved.",
+                    "implementation_diff_path": str(diff_path),
+                    "promotion_mode": "patch_bundle",
+                },
+            }
+        )
+
+        updated = orch._promote(context)
+        patch_path = Path(updated.metadata["promotion_patch_path"])
+        run = orch.state_store.load_run(updated.metadata["run_id"])
+
+        assert patch_path.exists()
+        assert patch_path.read_text(encoding="utf-8").startswith("diff --git")
+        assert orch.stage_outputs["promote"]["status"] == "completed"
+        assert orch.stage_outputs["promote"]["artifacts"] == [str(patch_path)]
+        assert run.metadata["promotion"]["mode"] == "patch_bundle"
+        assert run.metadata["promotion"]["patch_path"] == str(patch_path)
+        assert run.metadata["promotion_branch"] == updated.metadata["promotion_branch"]
+
+    def test_promote_branch_push_persists_branch_metadata(self, tmp_path, monkeypatch):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/28")
+        )
+        events: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            orch,
+            "_ensure_promotion_branch",
+            lambda repo_path, branch_name: events.update(
+                {"repo_path": repo_path, "branch_name": branch_name}
+            ),
+        )
+        monkeypatch.setattr(orch, "_commit_promotion_changes", lambda repo_path, message: True)
+        monkeypatch.setattr(
+            orch.workspace_manager.git_tool,
+            "push",
+            lambda repo_path, branch_name: events.update(
+                {"pushed_repo_path": repo_path, "pushed_branch": branch_name}
+            ),
+        )
+
+        context = started.model_copy(
+            update={
+                "repo_path": started.repo_path,
+                "metadata": {
+                    **started.metadata,
+                    "review_decision": ReviewDecision.APPROVED.value,
+                    "issue_title": "Ship branch",
+                    "promotion_mode": "branch_push",
+                },
+            }
+        )
+
+        updated = orch._promote(context)
+        run = orch.state_store.load_run(updated.metadata["run_id"])
+
+        assert events["branch_name"] == updated.metadata["promotion_branch"]
+        assert events["pushed_branch"] == updated.metadata["promotion_branch"]
+        assert updated.metadata["promotion_pushed"] is True
+        assert updated.metadata["promotion_commit_created"] is True
+        assert orch.stage_outputs["promote"]["metrics"]["promotion_mode"] == "branch_push"
+        assert run.metadata["promotion"]["branch"] == updated.metadata["promotion_branch"]
+        assert run.metadata["promotion"]["pushed"] is True
+
+    def test_promote_pull_request_generates_title_and_body_from_artifacts(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/29")
+        )
+        planning_artifact = Path(started.repo_path) / "planning.json"
+        planning_artifact.write_text('{"plan": ["1. Update auth.py"]}\n', encoding="utf-8")
+        diff_path = Path(started.repo_path) / "working_tree.diff"
+        diff_path.write_text("diff --git a/auth.py b/auth.py\n+fix\n", encoding="utf-8")
+        review_result = Path(started.repo_path) / "review.json"
+        review_result.write_text('{"decision": "approved"}\n', encoding="utf-8")
+        created: dict[str, str] = {}
+
+        monkeypatch.setattr(
+            orch,
+            "_push_branch",
+            lambda context: context.model_copy(
+                update={
+                    "metadata": {
+                        **context.metadata,
+                        "promotion_branch": "autodev/issue-29",
+                        "promotion_pushed": True,
+                    }
+                }
+            ),
+        )
+
+        class StubPRCreator:
+            def create(self, repo_full_name, branch_name, title, body):
+                created["repo_full_name"] = repo_full_name
+                created["branch_name"] = branch_name
+                created["title"] = title
+                created["body"] = body
+                return "https://example.com/pr/29"
+
+        monkeypatch.setattr("autodev.core.runtime.PRCreator", StubPRCreator)
+
+        context = started.model_copy(
+            update={
+                "files_modified": ["auth.py", "tests/test_auth.py"],
+                "validation_results": "PASSED\n\n$ pytest tests/test_auth.py -q\nexit_code=0",
+                "metadata": {
+                    **started.metadata,
+                    "repo_full_name": "octocat/Hello-World",
+                    "review_decision": ReviewDecision.APPROVED.value,
+                    "review_summary": "Review approved after validation and policy checks.",
+                    "issue_title": "Improve auth flow",
+                    "acceptance_criteria": ["reject invalid tokens"],
+                    "planning_artifact_path": str(planning_artifact),
+                    "implementation_diff_path": str(diff_path),
+                    "review_result_path": str(review_result),
+                    "promotion_mode": "pull_request",
+                },
+            }
+        )
+
+        updated = orch._promote(context)
+        run = orch.state_store.load_run(updated.metadata["run_id"])
+
+        assert created["branch_name"] == "autodev/issue-29"
+        assert created["title"] == "[AutoDev] Improve auth flow"
+        assert "## Files Modified" in created["body"]
+        assert "auth.py" in created["body"]
+        assert str(diff_path) in created["body"]
+        assert updated.metadata["pr_url"] == "https://example.com/pr/29"
+        assert orch.stage_outputs["promote"]["metrics"]["promotion_mode"] == "pull_request"
+        assert run.metadata["promotion"]["pr_title"] == created["title"]
+        assert run.metadata["promotion"]["pr_url"] == "https://example.com/pr/29"
 
     def test_run_pipeline_finalizes_completed_run(self, tmp_path, monkeypatch):
         orch = Orchestrator(work_dir=str(tmp_path), dry_run=True)

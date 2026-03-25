@@ -1,10 +1,13 @@
 """Tests for agent components."""
 
+from pathlib import Path
+
 from autodev.agents.base import AgentContext
 from autodev.agents.coder import CoderAgent
 from autodev.agents.debugger import DebuggerAgent
 from autodev.agents.planner import PlannerAgent
 from autodev.agents.reviewer import ReviewerAgent
+from autodev.core.schemas import ReviewDecision
 from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
 from autodev.core.workspace_manager import WorkspaceManager
@@ -204,16 +207,75 @@ class TestReviewerAgent:
         ctx = AgentContext(
             files_modified=["auth.py"],
             validation_results="PASSED",
+            metadata={"acceptance_criteria": ["reject invalid tokens"]},
         )
         result = agent.run("review changes", ctx)
         assert "review" in result.metadata
+        assert result.metadata["review_decision"] == ReviewDecision.APPROVED.value
+        assert result.metadata["review_checks"]["validation_passed"] is True
         assert result.metadata["review_passed"] is True
+
+    def test_run_blocks_policy_failures(self):
+        agent = ReviewerAgent()
+        ctx = AgentContext(
+            files_modified=["auth.py"],
+            validation_results="PASSED",
+            metadata={
+                "acceptance_criteria": ["reject invalid tokens"],
+                "policy_checks_passed": False,
+                "policy_gate_failures": ["branch naming policy failed"],
+            },
+        )
+
+        result = agent.run("review changes", ctx)
+
+        assert result.metadata["review_decision"] == ReviewDecision.BLOCKED.value
+        assert result.metadata["review_checks"]["policy_checks_passed"] is False
+        assert result.metadata["policy_gate_failures"] == ["branch naming policy failed"]
+        assert "branch naming policy failed" in result.metadata["review_blocking_reasons"]
+
+    def test_run_blocks_secret_like_content(self, tmp_path):
+        agent = ReviewerAgent()
+        secret_file = Path(tmp_path) / "secrets.py"
+        secret_file.write_text('OPENAI_API_KEY = "sk-1234567890abcdef"\n', encoding="utf-8")
+        ctx = AgentContext(
+            repo_path=str(tmp_path),
+            files_modified=["secrets.py"],
+            validation_results="PASSED",
+            metadata={"acceptance_criteria": ["keep credentials out of source"]},
+        )
+
+        result = agent.run("review changes", ctx)
+
+        assert result.metadata["review_decision"] == ReviewDecision.BLOCKED.value
+        assert result.metadata["review_checks"]["secret_exposure_clear"] is False
+        assert result.metadata["secret_exposure_findings"][0]["path"] == "secrets.py"
+        assert (
+            "sk-1234567890abcdef" not in result.metadata["secret_exposure_findings"][0]["preview"]
+        )
+        assert "secret-like content detected" in result.metadata["review_summary"]
 
     def test_run_flags_no_changes(self):
         agent = ReviewerAgent()
-        ctx = AgentContext(files_modified=[])
+        ctx = AgentContext(files_modified=[], metadata={"acceptance_criteria": ["something"]})
         result = agent.run("review changes", ctx)
+        assert result.metadata["review_decision"] == ReviewDecision.BLOCKED.value
         assert result.metadata.get("review_passed") is False
+
+    def test_run_awaits_human_approval_when_required(self):
+        agent = ReviewerAgent()
+        ctx = AgentContext(
+            files_modified=["auth.py"],
+            validation_results="PASSED",
+            metadata={
+                "acceptance_criteria": ["reject invalid tokens"],
+                "requires_human_approval": True,
+            },
+        )
+        result = agent.run("review changes", ctx)
+
+        assert result.metadata["review_decision"] == ReviewDecision.AWAITING_HUMAN_APPROVAL.value
+        assert result.metadata["review_passed"] is False
 
 
 class TestDebuggerAgent:

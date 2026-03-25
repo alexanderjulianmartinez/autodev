@@ -224,8 +224,10 @@ The biggest gaps are:
 
 ### AD-015 Build a targeted validation engine based on changed files and explicit commands
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p0`
 - **Type:** `type:validation`
+- **Completion notes:** expanded [../autodev/tools/test_runner.py](../autodev/tools/test_runner.py) into a structured validation engine with explicit command overrides, changed-file-aware pytest targeting, and per-command result capture, then updated [../autodev/core/phase_registry.py](../autodev/core/phase_registry.py) and [../autodev/core/runtime.py](../autodev/core/runtime.py) to resolve backlog-driven validation commands, persist [../autodev/core/schemas.py](../autodev/core/schemas.py) `ValidationResult` artifacts via the state store, and surface validation metadata/artifacts in phase output, covered by [../tests/test_tools.py](../tests/test_tools.py) and [../tests/test_core.py](../tests/test_core.py).
 - **Problem:** The current test runner only executes one command and cannot infer the smallest useful validation set.
 - **Scope:** Add validation profiles, changed-file inference, explicit command override support, and structured result persistence.
 - **Acceptance criteria:**
@@ -235,8 +237,10 @@ The biggest gaps are:
 
 ### AD-016 Add failure classification for retryable, validation, policy, environment, and manual-intervention failures
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p0`
 - **Type:** `type:validation`
+- **Completion notes:** added [../autodev/core/failure_classifier.py](../autodev/core/failure_classifier.py) to classify failed phase outcomes into retryable, validation, policy, environment, and manual-intervention buckets, then updated [../autodev/core/phase_registry.py](../autodev/core/phase_registry.py) and [../autodev/core/runtime.py](../autodev/core/runtime.py) so failed phases persist classified [../autodev/core/schemas.py](../autodev/core/schemas.py) task results and drive durable scheduler state for matching backlog tasks, covered by [../tests/test_failure_classifier.py](../tests/test_failure_classifier.py), [../tests/test_core.py](../tests/test_core.py), and [../tests/test_scheduler.py](../tests/test_scheduler.py).
 - **Problem:** The current runtime only distinguishes pass/fail in a coarse way and cannot drive scheduler policy from failure type.
 - **Scope:** Classify failures at phase boundaries and attach classification to task results.
 - **Acceptance criteria:**
@@ -246,8 +250,10 @@ The biggest gaps are:
 
 ### AD-017 Add stop-on-first-failure and configurable validation breadth
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:validation`
+- **Completion notes:** extended [../autodev/tools/test_runner.py](../autodev/tools/test_runner.py) with configurable validation breadth (`targeted` vs `broader-fallback`), continue-on-error/stop-on-first-failure handling, and persisted selection rationale, then updated [../autodev/core/phase_registry.py](../autodev/core/phase_registry.py) and [../autodev/core/schemas.py](../autodev/core/schemas.py) so backlog/runtime policy metadata flows into validation artifacts and human-readable output, covered by [../tests/test_tools.py](../tests/test_tools.py), [../tests/test_core.py](../tests/test_core.py), and [../tests/test_schemas.py](../tests/test_schemas.py).
 - **Problem:** The validation strategy needs clear runtime policy knobs for cost and speed.
 - **Scope:** Support strict targeted validation, broader fallback validation, and optional continue-on-error behavior.
 - **Acceptance criteria:**
@@ -259,8 +265,10 @@ The biggest gaps are:
 
 ### AD-018 Implement a structured review engine with explicit decisions
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p0`
 - **Type:** `type:review`
+- **Completion notes:** refactored [../autodev/agents/reviewer.py](../autodev/agents/reviewer.py) into a deterministic review engine that evaluates diff presence, validation status, acceptance criteria, and optional approval/policy gates to emit explicit review decisions, then updated [../autodev/core/phase_registry.py](../autodev/core/phase_registry.py) and [../autodev/core/runtime.py](../autodev/core/runtime.py) to persist structured [../autodev/core/schemas.py](../autodev/core/schemas.py) `ReviewResult` artifacts and automatically block promotion unless review is approved, covered by [../tests/test_agents.py](../tests/test_agents.py), [../tests/test_core.py](../tests/test_core.py), [../tests/test_schemas.py](../tests/test_schemas.py), and [../tests/test_state_store.py](../tests/test_state_store.py).
 - **Problem:** The current reviewer writes an assessment string but does not emit a structured decision.
 - **Scope:** Produce review outputs such as `approved`, `changes_requested`, `blocked`, and `awaiting_human_approval`.
 - **Acceptance criteria:**
@@ -270,8 +278,10 @@ The biggest gaps are:
 
 ### AD-019 Add policy and secret-exposure gates before promotion
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:review`
+- **Completion notes:** extended [../autodev/agents/reviewer.py](../autodev/agents/reviewer.py) with deterministic policy-gate failures, redacted secret-exposure heuristics over changed files and diff fallbacks, and explicit review metadata for blocked gates, then updated [../autodev/core/phase_registry.py](../autodev/core/phase_registry.py) to persist those review details in structured artifacts, covered by [../tests/test_agents.py](../tests/test_agents.py) and [../tests/test_core.py](../tests/test_core.py).
 - **Problem:** Promotion should be blocked when changes fail policy or reveal obvious secrets.
 - **Scope:** Add basic policy checks and file-content heuristics that run during review.
 - **Acceptance criteria:**
@@ -281,8 +291,10 @@ The biggest gaps are:
 
 ### AD-020 Implement promotion workflows: patch bundle, branch push, and PR creation
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:github`
+- **Completion notes:** refactored [../autodev/core/runtime.py](../autodev/core/runtime.py) to support promotion modes for patch bundles, branch pushes, and pull requests behind approved review gates, including generated PR title/body content from run artifacts plus persisted promotion metadata such as branch names, commit details, patch paths, and PR URLs, covered by [../tests/test_core.py](../tests/test_core.py).
 - **Problem:** PR creation exists only as a thin final step and is not integrated with approval state or run artifacts.
 - **Scope:** Support multiple promotion outcomes, including emit patch, push branch, and open PR when review allows it.
 - **Acceptance criteria:**
