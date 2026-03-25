@@ -67,6 +67,7 @@ class Orchestrator:
             model_router=self.model_router,
             supervisor=self.supervisor,
             workspace_manager=self.workspace_manager,
+            default_workspace_path=self.work_dir,
         )
         self._state: PipelineState = PipelineState.PENDING
         self._stage_outputs: dict[str, Any] = {}
@@ -319,20 +320,21 @@ class Orchestrator:
 
         artifacts = self.workspace_manager.capture_implementation_artifacts(run_id)
         files_modified = self._changed_files_from_artifact(artifacts["changed_files"])
+        final_files_modified = files_modified or list(updated.files_modified)
         metadata = dict(updated.metadata)
         metadata["implementation_diff_path"] = str(artifacts["diff"])
         metadata["changed_files_path"] = str(artifacts["changed_files"])
-        metadata["implementation_change_summary"] = files_modified
+        metadata["implementation_change_summary"] = final_files_modified
         self._stage_outputs.setdefault("implement", {}).setdefault("artifacts", [])
         for artifact in (artifacts["diff"], artifacts["changed_files"]):
             if str(artifact) not in self._stage_outputs["implement"]["artifacts"]:
                 self._stage_outputs["implement"]["artifacts"].append(str(artifact))
         self._stage_outputs.setdefault("implement", {}).setdefault("metrics", {})[
             "files_modified"
-        ] = len(files_modified) or len(updated.files_modified)
+        ] = len(final_files_modified)
         return updated.model_copy(
             update={
-                "files_modified": files_modified or list(updated.files_modified),
+                "files_modified": final_files_modified,
                 "metadata": metadata,
             }
         )

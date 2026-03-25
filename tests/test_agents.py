@@ -79,6 +79,15 @@ class TestPlannerAgent:
         assert any("pytest" in hint.lower() for hint in result.metadata["validation_hints"])
         assert any("auth.py" in step for step in result.plan)
 
+    def test_score_candidate_file_skips_oversized_content_reads(self, tmp_path):
+        agent = PlannerAgent()
+        candidate = tmp_path / "notes.txt"
+        candidate.write_text("validation " * 10000, encoding="utf-8")
+
+        score = agent._score_candidate_file(candidate, "notes.txt", ["validation"])
+
+        assert score == 0
+
 
 class TestCoderAgent:
     def test_run_modifies_files_modified(self):
@@ -86,6 +95,19 @@ class TestCoderAgent:
         ctx = AgentContext(plan=["1. Modify auth.py to add token validation"])
         result = agent.run("implement plan", ctx)
         assert isinstance(result.files_modified, list)
+
+    def test_run_falls_back_to_stub_when_repo_path_is_missing(self):
+        class StubRouter:
+            def generate(self, _prompt, model_key=None):
+                return "generated.py"
+
+        agent = CoderAgent(model_router=StubRouter())
+        ctx = AgentContext(plan=["1. Update README.md"], files_modified=[])
+
+        result = agent.run("implement plan", ctx)
+
+        assert "README.md" in result.files_modified
+        assert "generated.py" not in result.files_modified
 
     def test_run_applies_controlled_edit_to_workspace_file(self, tmp_path):
         store = FileStateStore(str(tmp_path / "state"))

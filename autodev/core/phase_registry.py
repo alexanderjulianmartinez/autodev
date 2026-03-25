@@ -148,12 +148,18 @@ class ImplementPhaseHandler(PhaseHandler):
 
 
 class ValidatePhaseHandler(PhaseHandler):
-    def __init__(self, *, supervisor: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        supervisor: Any = None,
+        default_workspace_path: str | None = None,
+    ) -> None:
         self._supervisor = supervisor
+        self._default_workspace_path = default_workspace_path or "."
 
     def execute(self, payload: PhaseExecutionPayload) -> PhaseExecutionResult:
         runner = TestRunner(supervisor=self._supervisor)
-        repo_path = payload.repo_path or "."
+        repo_path = payload.repo_path or self._default_workspace_path
         result = runner.run(repo_path)
         validation_status = ValidationStatus.PASSED if result.passed else ValidationStatus.FAILED
         output = f"{validation_status.value.upper()}\n{result.output}\n{result.error}".strip()
@@ -214,6 +220,7 @@ class PhaseRegistry:
         model_router: Any = None,
         supervisor: Any = None,
         workspace_manager: Any = None,
+        default_workspace_path: str | None = None,
     ) -> "PhaseRegistry":
         registry = cls()
         registry.register(PhaseName.PLAN, PlannerPhaseHandler(model_router=model_router))
@@ -225,7 +232,13 @@ class PhaseRegistry:
                 supervisor=supervisor,
             ),
         )
-        registry.register(PhaseName.VALIDATE, ValidatePhaseHandler(supervisor=supervisor))
+        registry.register(
+            PhaseName.VALIDATE,
+            ValidatePhaseHandler(
+                supervisor=supervisor,
+                default_workspace_path=default_workspace_path,
+            ),
+        )
         registry.register(PhaseName.REVIEW, ReviewPhaseHandler(model_router=model_router))
         registry.register(PhaseName.PROMOTE, PromotePhaseHandler())
         return registry
@@ -244,4 +257,12 @@ class PhaseRegistry:
             raise KeyError(f"No handler registered for phase {phase.value!r}") from exc
 
     def execute(self, payload: PhaseExecutionPayload) -> PhaseExecutionResult:
-        return self.get(payload.phase).execute(payload)
+        started_at = utc_now()
+        result = self.get(payload.phase).execute(payload)
+        completed_at = utc_now()
+        return result.model_copy(
+            update={
+                "started_at": started_at,
+                "completed_at": completed_at,
+            }
+        )

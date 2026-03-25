@@ -41,6 +41,8 @@ PLANNER_STOP_WORDS = {
 }
 TEXT_FILE_SUFFIXES = {".py", ".md", ".rst", ".toml", ".yaml", ".yml", ".json", ".txt"}
 IGNORED_PATH_PARTS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
+MAX_SCORING_FILE_BYTES = 64 * 1024
+MAX_SCORING_SAMPLE_CHARS = 4000
 
 
 class PlannerAgent(Agent):
@@ -211,16 +213,26 @@ class PlannerAgent(Agent):
             if candidate.stem.lower() == token:
                 score += 3
 
-        try:
-            sample = candidate.read_text(encoding="utf-8")[:4000].lower()
-        except (OSError, UnicodeDecodeError):
-            sample = ""
+        sample = self._read_candidate_sample(candidate)
 
         for token in tokens[:8]:
             if token in sample:
                 score += 1
 
         return score
+
+    def _read_candidate_sample(self, candidate: Path) -> str:
+        try:
+            if candidate.stat().st_size > MAX_SCORING_FILE_BYTES:
+                return ""
+        except OSError:
+            return ""
+
+        try:
+            with candidate.open("r", encoding="utf-8") as handle:
+                return handle.read(MAX_SCORING_SAMPLE_CHARS).lower()
+        except (OSError, UnicodeDecodeError):
+            return ""
 
     def _build_validation_hints(
         self,

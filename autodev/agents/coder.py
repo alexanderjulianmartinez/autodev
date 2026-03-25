@@ -48,7 +48,7 @@ class CoderAgent(Agent):
                 files_modified,
             )
             metadata.update(implementation_metadata)
-        elif self.model_router:
+        elif self.model_router and context.repo_path:
             files_modified = self._apply_plan_with_model(context, files_modified)
         else:
             files_modified = self._apply_plan_stub(context, files_modified)

@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,43 @@ class TestOrchestrator:
             PhaseName.REVIEW,
             PhaseName.PROMOTE,
         }
+
+    def test_phase_registry_execution_sets_boundary_timestamps(self, monkeypatch):
+        registry = PhaseRegistry()
+        timestamp_values = iter(
+            [
+                datetime(2026, 3, 25, 12, 0, 0, tzinfo=timezone.utc),
+                datetime(2026, 3, 25, 12, 0, 1, tzinfo=timezone.utc),
+            ]
+        )
+
+        class TimestampHandler:
+            def execute(self, payload: PhaseExecutionPayload) -> PhaseExecutionResult:
+                return PhaseExecutionResult(
+                    phase=payload.phase,
+                    task_id=payload.task_id,
+                    status=TaskStatus.COMPLETED,
+                    message="ok",
+                    context=payload.to_context(),
+                    started_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+                    completed_at=datetime(2000, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=1),
+                )
+
+        registry.register(PhaseName.PLAN, TimestampHandler())
+        monkeypatch.setattr(
+            "autodev.core.phase_registry.utc_now",
+            lambda: next(timestamp_values),
+        )
+
+        result = registry.execute(
+            PhaseExecutionPayload(
+                phase=PhaseName.PLAN,
+                task_id="run-1-plan",
+            )
+        )
+
+        assert result.started_at == datetime(2026, 3, 25, 12, 0, 0, tzinfo=timezone.utc)
+        assert result.completed_at == datetime(2026, 3, 25, 12, 0, 1, tzinfo=timezone.utc)
 
     def test_plan_phase_can_be_swapped_via_registry(self, tmp_path):
         orch = Orchestrator(work_dir=str(tmp_path))
@@ -224,6 +262,62 @@ class TestOrchestrator:
             str(updated.metadata["implementation_diff_path"])
             in orch.stage_outputs["implement"]["artifacts"]
         )
+
+    def test_validate_uses_orchestrator_work_dir_when_repo_path_is_missing(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        captured: dict[str, str] = {}
+
+        def fake_run(self, repo_path=".", test_command="pytest"):
+            captured["repo_path"] = repo_path
+            captured["test_command"] = test_command
+
+            class Result:
+                passed = True
+                output = "ok"
+                error = ""
+                return_code = 0
+
+            return Result()
+
+        monkeypatch.setattr("autodev.core.phase_registry.TestRunner.run", fake_run)
+
+        updated = orch._validate(AgentContext(repo_path=""))
+
+        assert captured["repo_path"] == str(tmp_path)
+        assert updated.validation_results.startswith("PASSED")
+
+    def test_implement_uses_fallback_files_modified_when_artifact_parse_fails(
+        self, tmp_path, monkeypatch
+    ):
+        orch = Orchestrator(work_dir=str(tmp_path))
+        started = orch._start_run(
+            AgentContext(issue_url="https://github.com/octocat/Hello-World/issues/17")
+        )
+        changed_files_path = Path(started.repo_path) / "changed_files.json"
+        diff_path = Path(started.repo_path) / "working_tree.diff"
+        changed_files_path.write_text("not json", encoding="utf-8")
+        diff_path.write_text("diff --git a/README.md b/README.md\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            orch.workspace_manager,
+            "capture_implementation_artifacts",
+            lambda _run_id: {"diff": diff_path, "changed_files": changed_files_path},
+        )
+        monkeypatch.setattr(
+            orch,
+            "_execute_phase",
+            lambda _phase, _context: started.model_copy(
+                update={"files_modified": ["fallback.py"], "metadata": dict(started.metadata)}
+            ),
+        )
+
+        updated = orch._implement(started)
+
+        assert updated.files_modified == ["fallback.py"]
+        assert updated.metadata["implementation_change_summary"] == ["fallback.py"]
+        assert orch.stage_outputs["implement"]["metrics"]["files_modified"] == 1
 
     def test_execute_simple(self):
         orch = Orchestrator()
