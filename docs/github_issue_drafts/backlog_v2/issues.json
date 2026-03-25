@@ -1,0 +1,402 @@
+[
+  {
+    "identifier": "AD-028",
+    "title": "Define base integration interfaces and typed capability contracts",
+    "milestone": "Integration Architecture Foundations",
+    "priority": "priority:p0",
+    "issue_type": "type:core",
+    "problem": "The repo has provider-specific helpers, but no common interface for fetch, update, execute, or capability discovery across external systems.",
+    "scope": "Introduce stable base interfaces and typed request/response models for Git providers, issue trackers, CI systems, monitoring systems, messaging systems, and documentation providers.",
+    "acceptance_criteria": [
+      "each integration type has a small, explicit interface with typed inputs and outputs",
+      "capability metadata can describe what a provider supports without provider-specific branching in runtime code",
+      "provider adapters can be swapped without changing orchestration logic"
+    ],
+    "github_title": "AD-028 Define base integration interfaces and typed capability contracts",
+    "suggested_labels": [
+      "priority:p0",
+      "type:core"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-028`\n- Milestone: Integration Architecture Foundations\n- Suggested labels: priority:p0, type:core\n\n## Problem\n\nThe repo has provider-specific helpers, but no common interface for fetch, update, execute, or capability discovery across external systems.\n\n## Scope\n\nIntroduce stable base interfaces and typed request/response models for Git providers, issue trackers, CI systems, monitoring systems, messaging systems, and documentation providers.\n\n## Acceptance Criteria\n\n- each integration type has a small, explicit interface with typed inputs and outputs\n- capability metadata can describe what a provider supports without provider-specific branching in runtime code\n- provider adapters can be swapped without changing orchestration logic\n"
+  },
+  {
+    "identifier": "AD-029",
+    "title": "Add a plugin registry and config-driven integration loading",
+    "milestone": "Integration Architecture Foundations",
+    "priority": "priority:p0",
+    "issue_type": "type:integration",
+    "problem": "The runtime cannot currently enable, disable, or select integrations declaratively.",
+    "scope": "Build a plugin registry that loads providers from configuration, validates required settings, and exposes integration instances by capability.",
+    "acceptance_criteria": [
+      "integration configuration can select one provider per capability such as `git`, `issue_tracker`, `ci`, and `monitoring`",
+      "invalid or incomplete integration config fails early with actionable diagnostics",
+      "runtime code can resolve integrations through the registry instead of constructing adapters directly"
+    ],
+    "github_title": "AD-029 Add a plugin registry and config-driven integration loading",
+    "suggested_labels": [
+      "priority:p0",
+      "type:integration"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-029`\n- Milestone: Integration Architecture Foundations\n- Suggested labels: priority:p0, type:integration\n\n## Problem\n\nThe runtime cannot currently enable, disable, or select integrations declaratively.\n\n## Scope\n\nBuild a plugin registry that loads providers from configuration, validates required settings, and exposes integration instances by capability.\n\n## Acceptance Criteria\n\n- integration configuration can select one provider per capability such as `git`, `issue_tracker`, `ci`, and `monitoring`\n- invalid or incomplete integration config fails early with actionable diagnostics\n- runtime code can resolve integrations through the registry instead of constructing adapters directly\n"
+  },
+  {
+    "identifier": "AD-030",
+    "title": "Scaffold the integration package structure and shared mapping models",
+    "milestone": "Integration Architecture Foundations",
+    "priority": "priority:p1",
+    "issue_type": "type:integration",
+    "problem": "The current package layout does not provide a clear home for the broader integration surface described in the v0.2 spec.",
+    "scope": "Add an `autodev/integrations/` package, shared domain models, normalization helpers, and package-level documentation for future adapters.",
+    "acceptance_criteria": [
+      "the repo has a dedicated package structure for integration plugins and shared models",
+      "normalized models exist for external entities such as issues, pull requests, CI runs, and error events",
+      "package docs explain how new integrations should be added and tested"
+    ],
+    "github_title": "AD-030 Scaffold the integration package structure and shared mapping models",
+    "suggested_labels": [
+      "priority:p1",
+      "type:integration"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-030`\n- Milestone: Integration Architecture Foundations\n- Suggested labels: priority:p1, type:integration\n\n## Problem\n\nThe current package layout does not provide a clear home for the broader integration surface described in the v0.2 spec.\n\n## Scope\n\nAdd an `autodev/integrations/` package, shared domain models, normalization helpers, and package-level documentation for future adapters.\n\n## Acceptance Criteria\n\n- the repo has a dedicated package structure for integration plugins and shared models\n- normalized models exist for external entities such as issues, pull requests, CI runs, and error events\n- package docs explain how new integrations should be added and tested\n"
+  },
+  {
+    "identifier": "AD-031",
+    "title": "Build a unified Git platform abstraction with GitHub as the reference implementation",
+    "milestone": "Tier 1 Workflow Integrations",
+    "priority": "priority:p0",
+    "issue_type": "type:github",
+    "problem": "Git platform logic is currently GitHub-shaped, which will make GitLab and Bitbucket support expensive to add later.",
+    "scope": "Define a shared Git platform adapter surface for repository metadata, branches, commits, pull requests, comments, and status links, then adapt the current GitHub helpers to that surface.",
+    "acceptance_criteria": [
+      "GitHub functionality is exposed through a provider-neutral interface",
+      "pull request creation and issue linking operate through the shared abstraction",
+      "the design leaves clear extension points for GitLab and Bitbucket providers"
+    ],
+    "github_title": "AD-031 Build a unified Git platform abstraction with GitHub as the reference implementation",
+    "suggested_labels": [
+      "priority:p0",
+      "type:github"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-031`\n- Milestone: Tier 1 Workflow Integrations\n- Suggested labels: priority:p0, type:github\n\n## Problem\n\nGit platform logic is currently GitHub-shaped, which will make GitLab and Bitbucket support expensive to add later.\n\n## Scope\n\nDefine a shared Git platform adapter surface for repository metadata, branches, commits, pull requests, comments, and status links, then adapt the current GitHub helpers to that surface.\n\n## Acceptance Criteria\n\n- GitHub functionality is exposed through a provider-neutral interface\n- pull request creation and issue linking operate through the shared abstraction\n- the design leaves clear extension points for GitLab and Bitbucket providers\n"
+  },
+  {
+    "identifier": "AD-032",
+    "title": "Add issue tracker integration contracts and implement Jira ticket intake",
+    "milestone": "Tier 1 Workflow Integrations",
+    "priority": "priority:p0",
+    "issue_type": "type:integration",
+    "problem": "The runtime can start from GitHub issues, but it cannot yet ingest the broader ticket-based workflows called out in the spec.",
+    "scope": "Define issue tracker interfaces and implement Jira support for fetching tickets, normalizing fields, mapping tickets to repositories, and posting progress updates.",
+    "acceptance_criteria": [
+      "`autodev run JIRA-123` can resolve a Jira ticket into a normalized backlog item",
+      "ticket metadata includes title, description, status, labels, assignee, and acceptance criteria when available",
+      "the runtime can post progress or PR links back to Jira through the shared interface"
+    ],
+    "github_title": "AD-032 Add issue tracker integration contracts and implement Jira ticket intake",
+    "suggested_labels": [
+      "priority:p0",
+      "type:integration"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-032`\n- Milestone: Tier 1 Workflow Integrations\n- Suggested labels: priority:p0, type:integration\n\n## Problem\n\nThe runtime can start from GitHub issues, but it cannot yet ingest the broader ticket-based workflows called out in the spec.\n\n## Scope\n\nDefine issue tracker interfaces and implement Jira support for fetching tickets, normalizing fields, mapping tickets to repositories, and posting progress updates.\n\n## Acceptance Criteria\n\n- `autodev run JIRA-123` can resolve a Jira ticket into a normalized backlog item\n- ticket metadata includes title, description, status, labels, assignee, and acceptance criteria when available\n- the runtime can post progress or PR links back to Jira through the shared interface\n"
+  },
+  {
+    "identifier": "AD-033",
+    "title": "Add Linear integration and repository-resolution rules for ticket-driven runs",
+    "milestone": "Tier 1 Workflow Integrations",
+    "priority": "priority:p1",
+    "issue_type": "type:integration",
+    "problem": "Supporting more than one tracker is necessary to validate the integration architecture and improve adoption.",
+    "scope": "Implement Linear on top of the issue tracker abstraction and add configuration for mapping projects, teams, or labels to repositories.",
+    "acceptance_criteria": [
+      "Linear tickets normalize into the same backlog item structure as Jira tickets",
+      "repository mapping rules are configurable and provider-agnostic",
+      "provider-specific fields do not leak into downstream runtime phases"
+    ],
+    "github_title": "AD-033 Add Linear integration and repository-resolution rules for ticket-driven runs",
+    "suggested_labels": [
+      "priority:p1",
+      "type:integration"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-033`\n- Milestone: Tier 1 Workflow Integrations\n- Suggested labels: priority:p1, type:integration\n\n## Problem\n\nSupporting more than one tracker is necessary to validate the integration architecture and improve adoption.\n\n## Scope\n\nImplement Linear on top of the issue tracker abstraction and add configuration for mapping projects, teams, or labels to repositories.\n\n## Acceptance Criteria\n\n- Linear tickets normalize into the same backlog item structure as Jira tickets\n- repository mapping rules are configurable and provider-agnostic\n- provider-specific fields do not leak into downstream runtime phases\n"
+  },
+  {
+    "identifier": "AD-034",
+    "title": "Build a CI provider abstraction and implement GitHub Actions intake for `fix-ci`",
+    "milestone": "Tier 2 Daily Usage Workflows",
+    "priority": "priority:p0",
+    "issue_type": "type:ci",
+    "problem": "fix-ci` is still a stub and there is no normalized way to fetch failed workflow context.",
+    "scope": "Introduce CI provider interfaces and implement GitHub Actions log/run ingestion that can create backlog items from failures.",
+    "acceptance_criteria": [
+      "failed workflow runs can be fetched and normalized into a standard CI failure payload",
+      "`autodev fix-ci` creates a backlog item with logs, failing step details, and candidate validation commands",
+      "the resulting run follows the normal phase pipeline and persists CI-specific artifacts"
+    ],
+    "github_title": "AD-034 Build a CI provider abstraction and implement GitHub Actions intake for `fix-ci`",
+    "suggested_labels": [
+      "priority:p0",
+      "type:ci"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-034`\n- Milestone: Tier 2 Daily Usage Workflows\n- Suggested labels: priority:p0, type:ci\n\n## Problem\n\nfix-ci` is still a stub and there is no normalized way to fetch failed workflow context.\n\n## Scope\n\nIntroduce CI provider interfaces and implement GitHub Actions log/run ingestion that can create backlog items from failures.\n\n## Acceptance Criteria\n\n- failed workflow runs can be fetched and normalized into a standard CI failure payload\n- `autodev fix-ci` creates a backlog item with logs, failing step details, and candidate validation commands\n- the resulting run follows the normal phase pipeline and persists CI-specific artifacts\n"
+  },
+  {
+    "identifier": "AD-035",
+    "title": "Extend CI coverage to CircleCI and Jenkins with shared failure normalization",
+    "milestone": "Tier 2 Daily Usage Workflows",
+    "priority": "priority:p1",
+    "issue_type": "type:ci",
+    "problem": "A single CI integration will not fully validate the abstraction or cover common real-world workflows.",
+    "scope": "Implement CircleCI and Jenkins adapters on the shared CI interface, focusing on failure metadata, logs, and build URLs.",
+    "acceptance_criteria": [
+      "CircleCI and Jenkins failures normalize into the same internal model as GitHub Actions failures",
+      "provider differences are isolated inside adapters rather than orchestration code",
+      "tests cover baseline normalization behavior across all supported CI adapters"
+    ],
+    "github_title": "AD-035 Extend CI coverage to CircleCI and Jenkins with shared failure normalization",
+    "suggested_labels": [
+      "priority:p1",
+      "type:ci"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-035`\n- Milestone: Tier 2 Daily Usage Workflows\n- Suggested labels: priority:p1, type:ci\n\n## Problem\n\nA single CI integration will not fully validate the abstraction or cover common real-world workflows.\n\n## Scope\n\nImplement CircleCI and Jenkins adapters on the shared CI interface, focusing on failure metadata, logs, and build URLs.\n\n## Acceptance Criteria\n\n- CircleCI and Jenkins failures normalize into the same internal model as GitHub Actions failures\n- provider differences are isolated inside adapters rather than orchestration code\n- tests cover baseline normalization behavior across all supported CI adapters\n"
+  },
+  {
+    "identifier": "AD-036",
+    "title": "Expand code review support into a first-class PR review workflow",
+    "milestone": "Tier 2 Daily Usage Workflows",
+    "priority": "priority:p1",
+    "issue_type": "type:github",
+    "problem": "The runtime can review its own implementation artifacts, but it does not yet support the `autodev review <pr>` workflow from the spec.",
+    "scope": "Add PR review intake, diff analysis, architecture-rule hooks, and structured suggestion output on top of the existing review engine.",
+    "acceptance_criteria": [
+      "a PR identifier can be resolved into diff, metadata, and validation context",
+      "review output distinguishes bugs, design concerns, and style suggestions",
+      "architecture or policy checks can be plugged into PR review without rewriting the core review phase"
+    ],
+    "github_title": "AD-036 Expand code review support into a first-class PR review workflow",
+    "suggested_labels": [
+      "priority:p1",
+      "type:github"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-036`\n- Milestone: Tier 2 Daily Usage Workflows\n- Suggested labels: priority:p1, type:github\n\n## Problem\n\nThe runtime can review its own implementation artifacts, but it does not yet support the `autodev review <pr>` workflow from the spec.\n\n## Scope\n\nAdd PR review intake, diff analysis, architecture-rule hooks, and structured suggestion output on top of the existing review engine.\n\n## Acceptance Criteria\n\n- a PR identifier can be resolved into diff, metadata, and validation context\n- review output distinguishes bugs, design concerns, and style suggestions\n- architecture or policy checks can be plugged into PR review without rewriting the core review phase\n"
+  },
+  {
+    "identifier": "AD-037",
+    "title": "Add monitoring provider interfaces and implement Sentry or Datadog error intake for `fix-error`",
+    "milestone": "Tier 2 Daily Usage Workflows",
+    "priority": "priority:p1",
+    "issue_type": "type:monitoring",
+    "problem": "The runtime has no path from production error signals to actionable repair work.",
+    "scope": "Add monitoring interfaces and implement one initial provider with support for fetching error events, stack traces, tags, and suspect commit metadata.",
+    "acceptance_criteria": [
+      "`autodev fix-error` can create a backlog item from a normalized production error event",
+      "error artifacts include stack trace, environment metadata, and linked release information when available",
+      "monitoring-specific details remain isolated behind the provider interface"
+    ],
+    "github_title": "AD-037 Add monitoring provider interfaces and implement Sentry or Datadog error intake for `fix-error`",
+    "suggested_labels": [
+      "priority:p1",
+      "type:monitoring"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-037`\n- Milestone: Tier 2 Daily Usage Workflows\n- Suggested labels: priority:p1, type:monitoring\n\n## Problem\n\nThe runtime has no path from production error signals to actionable repair work.\n\n## Scope\n\nAdd monitoring interfaces and implement one initial provider with support for fetching error events, stack traces, tags, and suspect commit metadata.\n\n## Acceptance Criteria\n\n- `autodev fix-error` can create a backlog item from a normalized production error event\n- error artifacts include stack trace, environment metadata, and linked release information when available\n- monitoring-specific details remain isolated behind the provider interface\n"
+  },
+  {
+    "identifier": "AD-038",
+    "title": "Add a command abstraction layer for common autonomous workflows",
+    "milestone": "Operator Experience and Control",
+    "priority": "priority:p0",
+    "issue_type": "type:cli",
+    "problem": "High-value workflows such as `fix-ci`, `fix-test`, `fix-error`, and `implement-feature` need deterministic entrypoints instead of ad hoc command handling.",
+    "scope": "Introduce a command registry that maps operator commands to deterministic intake + execution pipelines.",
+    "acceptance_criteria": [
+      "commands resolve to explicit pipeline definitions instead of scattered conditional logic",
+      "command metadata explains required inputs, enabled integrations, and resulting artifacts",
+      "adding a new command does not require editing the core orchestration loop"
+    ],
+    "github_title": "AD-038 Add a command abstraction layer for common autonomous workflows",
+    "suggested_labels": [
+      "priority:p0",
+      "type:cli"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-038`\n- Milestone: Operator Experience and Control\n- Suggested labels: priority:p0, type:cli\n\n## Problem\n\nHigh-value workflows such as `fix-ci`, `fix-test`, `fix-error`, and `implement-feature` need deterministic entrypoints instead of ad hoc command handling.\n\n## Scope\n\nIntroduce a command registry that maps operator commands to deterministic intake + execution pipelines.\n\n## Acceptance Criteria\n\n- commands resolve to explicit pipeline definitions instead of scattered conditional logic\n- command metadata explains required inputs, enabled integrations, and resulting artifacts\n- adding a new command does not require editing the core orchestration loop\n"
+  },
+  {
+    "identifier": "AD-039",
+    "title": "Implement human-in-the-loop approval checkpoints",
+    "milestone": "Operator Experience and Control",
+    "priority": "priority:p0",
+    "issue_type": "type:core",
+    "problem": "The spec requires approval gates, but the runtime has no reusable approval mechanism for plan, code, or promotion phases.",
+    "scope": "Add approval checkpoint models, CLI prompts or artifact-based approvals, and runtime gating behavior for `--approve` mode.",
+    "acceptance_criteria": [
+      "plan, implementation, and promotion checkpoints can require explicit approval when enabled",
+      "approval state is persisted and resumable",
+      "the scheduler can pause and resume cleanly around approval boundaries"
+    ],
+    "github_title": "AD-039 Implement human-in-the-loop approval checkpoints",
+    "suggested_labels": [
+      "priority:p0",
+      "type:core"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-039`\n- Milestone: Operator Experience and Control\n- Suggested labels: priority:p0, type:core\n\n## Problem\n\nThe spec requires approval gates, but the runtime has no reusable approval mechanism for plan, code, or promotion phases.\n\n## Scope\n\nAdd approval checkpoint models, CLI prompts or artifact-based approvals, and runtime gating behavior for `--approve` mode.\n\n## Acceptance Criteria\n\n- plan, implementation, and promotion checkpoints can require explicit approval when enabled\n- approval state is persisted and resumable\n- the scheduler can pause and resume cleanly around approval boundaries\n"
+  },
+  {
+    "identifier": "AD-040",
+    "title": "Implement execution replay and run audit artifacts",
+    "milestone": "Operator Experience and Control",
+    "priority": "priority:p1",
+    "issue_type": "type:cli",
+    "problem": "Operators cannot yet inspect prior runs as a coherent sequence of decisions, prompts, tool actions, and changes.",
+    "scope": "Add a replay-friendly event model and a `replay <run_id>` CLI path that renders key execution artifacts in order.",
+    "acceptance_criteria": [
+      "runs persist enough structured events to reconstruct the execution sequence",
+      "replay output includes decisions, prompts, file changes, failures, and review outcomes",
+      "replay works for both completed and failed runs"
+    ],
+    "github_title": "AD-040 Implement execution replay and run audit artifacts",
+    "suggested_labels": [
+      "priority:p1",
+      "type:cli"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-040`\n- Milestone: Operator Experience and Control\n- Suggested labels: priority:p1, type:cli\n\n## Problem\n\nOperators cannot yet inspect prior runs as a coherent sequence of decisions, prompts, tool actions, and changes.\n\n## Scope\n\nAdd a replay-friendly event model and a `replay <run_id>` CLI path that renders key execution artifacts in order.\n\n## Acceptance Criteria\n\n- runs persist enough structured events to reconstruct the execution sequence\n- replay output includes decisions, prompts, file changes, failures, and review outcomes\n- replay works for both completed and failed runs\n"
+  },
+  {
+    "identifier": "AD-041",
+    "title": "Build a repository knowledge graph v1 for planning and validation",
+    "milestone": "Intelligence and Data Compounding",
+    "priority": "priority:p1",
+    "issue_type": "type:knowledge",
+    "problem": "Repository understanding is currently shallow and largely prompt-driven, limiting planning accuracy and multi-file reasoning.",
+    "scope": "Build a first-pass repository knowledge graph using AST parsing, dependency extraction, and cross-file reference indexing.",
+    "acceptance_criteria": [
+      "the runtime can persist structured knowledge about files, symbols, imports, and references",
+      "planner and validator phases can query the graph for likely impact and dependency hints",
+      "graph generation is incremental or bounded enough for practical local use"
+    ],
+    "github_title": "AD-041 Build a repository knowledge graph v1 for planning and validation",
+    "suggested_labels": [
+      "priority:p1",
+      "type:knowledge"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-041`\n- Milestone: Intelligence and Data Compounding\n- Suggested labels: priority:p1, type:knowledge\n\n## Problem\n\nRepository understanding is currently shallow and largely prompt-driven, limiting planning accuracy and multi-file reasoning.\n\n## Scope\n\nBuild a first-pass repository knowledge graph using AST parsing, dependency extraction, and cross-file reference indexing.\n\n## Acceptance Criteria\n\n- the runtime can persist structured knowledge about files, symbols, imports, and references\n- planner and validator phases can query the graph for likely impact and dependency hints\n- graph generation is incremental or bounded enough for practical local use\n"
+  },
+  {
+    "identifier": "AD-042",
+    "title": "Add persistent memory for prior runs, failure patterns, and repository heuristics",
+    "milestone": "Intelligence and Data Compounding",
+    "priority": "priority:p1",
+    "issue_type": "type:data",
+    "problem": "The runtime does not yet learn from prior executions, repeated failures, or successful fix patterns.",
+    "scope": "Store reusable summaries from previous runs, validation outcomes, and repair strategies in a provider-neutral memory layer.",
+    "acceptance_criteria": [
+      "past runs can contribute lightweight suggestions to planning and validation",
+      "memory records are scoped so they do not contaminate unrelated repositories",
+      "operators can inspect or clear stored memory explicitly"
+    ],
+    "github_title": "AD-042 Add persistent memory for prior runs, failure patterns, and repository heuristics",
+    "suggested_labels": [
+      "priority:p1",
+      "type:data"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-042`\n- Milestone: Intelligence and Data Compounding\n- Suggested labels: priority:p1, type:data\n\n## Problem\n\nThe runtime does not yet learn from prior executions, repeated failures, or successful fix patterns.\n\n## Scope\n\nStore reusable summaries from previous runs, validation outcomes, and repair strategies in a provider-neutral memory layer.\n\n## Acceptance Criteria\n\n- past runs can contribute lightweight suggestions to planning and validation\n- memory records are scoped so they do not contaminate unrelated repositories\n- operators can inspect or clear stored memory explicitly\n"
+  },
+  {
+    "identifier": "AD-043",
+    "title": "Add metrics, experiment tracking, and model/provider performance reporting",
+    "milestone": "Intelligence and Data Compounding",
+    "priority": "priority:p1",
+    "issue_type": "type:data",
+    "problem": "The v0.2 design depends on measuring success rates and execution quality, but the runtime lacks structured telemetry for these outcomes.",
+    "scope": "Track task success rate, time to PR, retry count, validation pass rate, and model/provider-level execution metrics.",
+    "acceptance_criteria": [
+      "core run metrics are persisted per task and per run",
+      "metrics can be aggregated by command, integration provider, and model route",
+      "the design leaves room for later experimentation and optimization loops"
+    ],
+    "github_title": "AD-043 Add metrics, experiment tracking, and model/provider performance reporting",
+    "suggested_labels": [
+      "priority:p1",
+      "type:data"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-043`\n- Milestone: Intelligence and Data Compounding\n- Suggested labels: priority:p1, type:data\n\n## Problem\n\nThe v0.2 design depends on measuring success rates and execution quality, but the runtime lacks structured telemetry for these outcomes.\n\n## Scope\n\nTrack task success rate, time to PR, retry count, validation pass rate, and model/provider-level execution metrics.\n\n## Acceptance Criteria\n\n- core run metrics are persisted per task and per run\n- metrics can be aggregated by command, integration provider, and model route\n- the design leaves room for later experimentation and optimization loops\n"
+  },
+  {
+    "identifier": "AD-044",
+    "title": "Design containerized execution support for reproducible and sandboxed runs",
+    "milestone": "Advanced Automation Readiness",
+    "priority": "priority:p2",
+    "issue_type": "type:core",
+    "problem": "The spec calls for sandboxed execution, but current isolation focuses on local filesystem and git boundaries only.",
+    "scope": "Add a container execution abstraction and baseline Docker-oriented design for running phases in reproducible environments.",
+    "acceptance_criteria": [
+      "runtime execution can target either local or containerized isolation through a shared interface",
+      "environment requirements and bind mounts are explicit and testable",
+      "failure modes for missing images, build errors, and command timeouts are classified clearly"
+    ],
+    "github_title": "AD-044 Design containerized execution support for reproducible and sandboxed runs",
+    "suggested_labels": [
+      "priority:p2",
+      "type:core"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-044`\n- Milestone: Advanced Automation Readiness\n- Suggested labels: priority:p2, type:core\n\n## Problem\n\nThe spec calls for sandboxed execution, but current isolation focuses on local filesystem and git boundaries only.\n\n## Scope\n\nAdd a container execution abstraction and baseline Docker-oriented design for running phases in reproducible environments.\n\n## Acceptance Criteria\n\n- runtime execution can target either local or containerized isolation through a shared interface\n- environment requirements and bind mounts are explicit and testable\n- failure modes for missing images, build errors, and command timeouts are classified clearly\n"
+  },
+  {
+    "identifier": "AD-045",
+    "title": "Add messaging integration interfaces for Slack and Discord task intake",
+    "milestone": "Advanced Automation Readiness",
+    "priority": "priority:p2",
+    "issue_type": "type:integration",
+    "problem": "Chat-driven task creation is a likely adoption lever, but no messaging integration surface exists yet.",
+    "scope": "Define messaging interfaces and support slash-command or webhook-driven intake that creates backlog items from authorized requests.",
+    "acceptance_criteria": [
+      "messaging requests normalize into the same intake model as CLI and ticket-driven runs",
+      "authorization and audit metadata are persisted with the created backlog item",
+      "provider-specific transport details remain outside core runtime logic"
+    ],
+    "github_title": "AD-045 Add messaging integration interfaces for Slack and Discord task intake",
+    "suggested_labels": [
+      "priority:p2",
+      "type:integration"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-045`\n- Milestone: Advanced Automation Readiness\n- Suggested labels: priority:p2, type:integration\n\n## Problem\n\nChat-driven task creation is a likely adoption lever, but no messaging integration surface exists yet.\n\n## Scope\n\nDefine messaging interfaces and support slash-command or webhook-driven intake that creates backlog items from authorized requests.\n\n## Acceptance Criteria\n\n- messaging requests normalize into the same intake model as CLI and ticket-driven runs\n- authorization and audit metadata are persisted with the created backlog item\n- provider-specific transport details remain outside core runtime logic\n"
+  },
+  {
+    "identifier": "AD-046",
+    "title": "Design the deployment and cloud-provider abstraction for guarded `deploy` workflows",
+    "milestone": "Advanced Automation Readiness",
+    "priority": "priority:p2",
+    "issue_type": "type:integration",
+    "problem": "Deployment automation is in the long-term roadmap, but there is no clear abstraction for cloud targets, health checks, or rollback contracts.",
+    "scope": "Define the deployment provider interface, rollout lifecycle, health-check contracts, and rollback triggers for later AWS, GCP, and Azure support.",
+    "acceptance_criteria": [
+      "deployment steps are modeled as a deterministic pipeline with preflight, deploy, verify, and rollback stages",
+      "provider-neutral rollout and health-check models exist before any cloud-specific adapter is implemented",
+      "the design clearly separates deployment planning from execution credentials and secrets handling"
+    ],
+    "github_title": "AD-046 Design the deployment and cloud-provider abstraction for guarded `deploy` workflows",
+    "suggested_labels": [
+      "priority:p2",
+      "type:integration"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-046`\n- Milestone: Advanced Automation Readiness\n- Suggested labels: priority:p2, type:integration\n\n## Problem\n\nDeployment automation is in the long-term roadmap, but there is no clear abstraction for cloud targets, health checks, or rollback contracts.\n\n## Scope\n\nDefine the deployment provider interface, rollout lifecycle, health-check contracts, and rollback triggers for later AWS, GCP, and Azure support.\n\n## Acceptance Criteria\n\n- deployment steps are modeled as a deterministic pipeline with preflight, deploy, verify, and rollback stages\n- provider-neutral rollout and health-check models exist before any cloud-specific adapter is implemented\n- the design clearly separates deployment planning from execution credentials and secrets handling\n"
+  },
+  {
+    "identifier": "AD-047",
+    "title": "Document the integration architecture, plugin authoring model, and operator workflows",
+    "milestone": "Documentation and Adoption Support",
+    "priority": "priority:p1",
+    "issue_type": "type:docs",
+    "problem": "The v0.2 architecture adds several new extension surfaces that will be difficult to adopt without contributor and operator documentation.",
+    "scope": "Document integration interfaces, plugin registration, provider configuration, command workflows, and approval/replay behavior.",
+    "acceptance_criteria": [
+      "contributors have a clear guide for adding a new integration provider",
+      "operators can configure supported providers and run the main workflows locally",
+      "the docs reflect the actual code structure and execution model"
+    ],
+    "github_title": "AD-047 Document the integration architecture, plugin authoring model, and operator workflows",
+    "suggested_labels": [
+      "priority:p1",
+      "type:docs"
+    ],
+    "body": "## Backlog Metadata\n\n- Source: `backlog_v2.md`\n- Backlog item: `AD-047`\n- Milestone: Documentation and Adoption Support\n- Suggested labels: priority:p1, type:docs\n\n## Problem\n\nThe v0.2 architecture adds several new extension surfaces that will be difficult to adopt without contributor and operator documentation.\n\n## Scope\n\nDocument integration interfaces, plugin registration, provider configuration, command workflows, and approval/replay behavior.\n\n## Acceptance Criteria\n\n- contributors have a clear guide for adding a new integration provider\n- operators can configure supported providers and run the main workflows locally\n- the docs reflect the actual code structure and execution model\n"
+  }
+]

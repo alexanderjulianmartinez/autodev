@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import tempfile
 from enum import Enum
 from pathlib import Path
@@ -18,11 +19,21 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from autodev.agents.base import AgentContext
 from autodev.agents.debugger import DebuggerAgent
+from autodev.core.failure_classifier import classify_phase_failure
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseRegistry
-from autodev.core.schemas import IsolationMode, PhaseName, RunStatus, utc_now
+from autodev.core.schemas import (
+    FailureDetail,
+    IsolationMode,
+    PhaseName,
+    ReviewDecision,
+    RunStatus,
+    TaskResult,
+    TaskStatus,
+    utc_now,
+)
 from autodev.core.state_store import FileStateStore
 from autodev.core.supervisor import Supervisor
-from autodev.core.task_graph import TaskGraph
+from autodev.core.task_graph import TaskGraph, TaskScheduler
 from autodev.core.workspace_manager import WorkspaceManager
 from autodev.github.issue_reader import IssueReader
 from autodev.github.pr_creator import PRCreator
@@ -68,6 +79,7 @@ class Orchestrator:
             supervisor=self.supervisor,
             workspace_manager=self.workspace_manager,
             default_workspace_path=self.work_dir,
+            state_store=self.state_store,
         )
         self._state: PipelineState = PipelineState.PENDING
         self._stage_outputs: dict[str, Any] = {}
@@ -160,11 +172,42 @@ class Orchestrator:
                 context = self._review(context)
 
                 # 6. Open PR
-                if not self.dry_run:
-                    progress.update(task, description="Opening pull request...")
-                    context = self._open_pr(context)
+                if self._review_allows_promotion(context):
+                    promotion_mode = self._promotion_mode(context)
+                    if self.dry_run and promotion_mode != "patch_bundle":
+                        self._stage_outputs["promote"] = {
+                            "status": "skipped",
+                            "message": (
+                                f"Dry run: skipping remote promotion workflow {promotion_mode}."
+                            ),
+                            "artifacts": [],
+                            "metrics": {
+                                "review_decision": str(
+                                    context.metadata.get("review_decision", "unknown")
+                                ),
+                                "promotion_mode": promotion_mode,
+                            },
+                        }
+                        console.print("[yellow]Dry run: skipping remote promotion[/yellow]")
+                    else:
+                        progress.update(
+                            task,
+                            description=self._promotion_progress_message(promotion_mode),
+                        )
+                        context = self._promote(context)
                 else:
-                    console.print("[yellow]Dry run: skipping PR creation[/yellow]")
+                    self._stage_outputs["promote"] = {
+                        "status": "blocked",
+                        "message": self._promotion_blocked_message(context),
+                        "artifacts": [],
+                        "metrics": {
+                            "review_decision": str(
+                                context.metadata.get("review_decision", "unknown")
+                            ),
+                            "promotion_mode": self._promotion_mode(context),
+                        },
+                    }
+                    console.print("[yellow]Promotion skipped: review not approved[/yellow]")
 
             self._state = PipelineState.COMPLETED
             final_run_status = RunStatus.COMPLETED
@@ -216,14 +259,140 @@ class Orchestrator:
             context,
             task_id=self._phase_task_id(context, phase),
         )
-        result = self.phase_registry.execute(payload)
+        try:
+            result = self.phase_registry.execute(payload)
+        except Exception as exc:
+            failure = classify_phase_failure(
+                phase,
+                message=str(exc),
+                exception=exc,
+                metadata=payload.metadata,
+            )
+            self._record_phase_result(
+                payload=payload,
+                status=TaskStatus.FAILED,
+                message=str(exc),
+                artifacts=[],
+                metrics={},
+                failure=failure,
+                started_at=utc_now(),
+                completed_at=utc_now(),
+            )
+            raise
+
+        failure = result.failure
+        if result.status == TaskStatus.FAILED and failure is None:
+            failure = classify_phase_failure(
+                phase,
+                message=result.message,
+                metadata={
+                    **payload.metadata,
+                    **result.context.metadata,
+                    "validation_results": result.context.validation_results,
+                },
+                metrics=result.metrics,
+            )
+            result = result.model_copy(update={"failure": failure})
+
         self._stage_outputs[phase.value] = {
             "status": result.status.value,
             "message": result.message,
             "artifacts": list(result.artifacts),
             "metrics": dict(result.metrics),
         }
+        if failure is not None:
+            self._stage_outputs[phase.value]["failure_class"] = failure.failure_class.value
+        self._persist_task_result(payload, result)
+        if result.status == TaskStatus.FAILED and failure is not None:
+            self._record_scheduler_failure(payload, failure)
         return result.context
+
+    def _persist_task_result(self, payload: PhaseExecutionPayload, result: Any) -> None:
+        run_id = str(payload.metadata.get("run_id", "")).strip()
+        if not run_id:
+            return
+        task_result = TaskResult(
+            task_id=payload.task_id,
+            status=result.status,
+            message=result.message,
+            artifacts=list(result.artifacts),
+            metrics=dict(result.metrics),
+            failure=result.failure,
+            started_at=result.started_at,
+            completed_at=result.completed_at,
+        )
+        task_result_path = self.state_store.save_task_result(run_id, task_result)
+        self._stage_outputs.setdefault(payload.phase.value, {}).setdefault("artifacts", [])
+        if str(task_result_path) not in self._stage_outputs[payload.phase.value]["artifacts"]:
+            self._stage_outputs[payload.phase.value]["artifacts"].append(str(task_result_path))
+
+    def _record_phase_result(
+        self,
+        *,
+        payload: PhaseExecutionPayload,
+        status: TaskStatus,
+        message: str,
+        artifacts: list[str],
+        metrics: dict[str, Any],
+        failure: FailureDetail | None,
+        started_at,
+        completed_at,
+    ) -> None:
+        self._stage_outputs[payload.phase.value] = {
+            "status": status.value,
+            "message": message,
+            "artifacts": list(artifacts),
+            "metrics": dict(metrics),
+        }
+        if failure is not None:
+            self._stage_outputs[payload.phase.value]["failure_class"] = failure.failure_class.value
+
+        run_id = str(payload.metadata.get("run_id", "")).strip()
+        if not run_id:
+            return
+        self.state_store.save_task_result(
+            run_id,
+            TaskResult(
+                task_id=payload.task_id,
+                status=status,
+                message=message,
+                artifacts=list(artifacts),
+                metrics=dict(metrics),
+                failure=failure,
+                started_at=started_at,
+                completed_at=completed_at,
+            ),
+        )
+        if failure is not None:
+            self._record_scheduler_failure(payload, failure)
+
+    def _record_scheduler_failure(
+        self,
+        payload: PhaseExecutionPayload,
+        failure: FailureDetail,
+    ) -> None:
+        durable_task = self._load_durable_task(payload)
+        if durable_task is None:
+            return
+        scheduler = TaskScheduler([durable_task], state_store=self.state_store)
+        scheduler.record_failure(durable_task.task_id, failure)
+
+    def _load_durable_task(self, payload: PhaseExecutionPayload) -> Any | None:
+        candidate_ids: list[str] = [payload.task_id]
+        backlog_item_id = str(payload.metadata.get("backlog_item_id", "")).strip()
+        if backlog_item_id:
+            candidate_ids.append(f"{backlog_item_id}__{payload.phase.value}")
+
+        seen: set[str] = set()
+        for candidate_id in candidate_ids:
+            if not candidate_id or candidate_id in seen:
+                continue
+            seen.add(candidate_id)
+            try:
+                return self.state_store.load_task(candidate_id)
+            except Exception:
+                continue
+        return None
 
     def _read_issue(self, context: AgentContext) -> AgentContext:
         try:
@@ -349,28 +518,370 @@ class Orchestrator:
     def _review(self, context: AgentContext) -> AgentContext:
         return self._execute_phase(PhaseName.REVIEW, context)
 
+    def _promote(self, context: AgentContext) -> AgentContext:
+        if not self._review_allows_promotion(context):
+            metadata = dict(context.metadata)
+            metadata["promotion_skipped_reason"] = self._promotion_blocked_message(context)
+            self._stage_outputs["promote"] = {
+                "status": "blocked",
+                "message": metadata["promotion_skipped_reason"],
+                "artifacts": [],
+                "metrics": {
+                    "review_decision": str(metadata.get("review_decision", "unknown")),
+                    "promotion_mode": self._promotion_mode(context),
+                },
+            }
+            updated = context.model_copy(update={"metadata": metadata})
+            self._persist_promotion_metadata(updated)
+            return updated
+
+        promotion_mode = self._promotion_mode(context)
+        metadata = dict(context.metadata)
+        promotion_branch = self._promotion_branch_name(context)
+        metadata["promotion_mode"] = promotion_mode
+        metadata["promotion_branch"] = promotion_branch
+        updated = context.model_copy(update={"metadata": metadata})
+
+        if promotion_mode == "patch_bundle":
+            patch_path = self._emit_patch_bundle(updated)
+            metadata = dict(updated.metadata)
+            metadata["promotion_patch_path"] = str(patch_path)
+            updated = updated.model_copy(update={"metadata": metadata})
+            self._stage_outputs["promote"] = {
+                "status": "completed",
+                "message": f"Patch bundle created at {patch_path}.",
+                "artifacts": [str(patch_path)],
+                "metrics": {
+                    "review_decision": str(metadata.get("review_decision", "approved")),
+                    "promotion_mode": promotion_mode,
+                    "promotion_branch": promotion_branch,
+                },
+            }
+            self._persist_promotion_metadata(updated)
+            return updated
+
+        updated = self._push_branch(updated)
+        if promotion_mode == "branch_push":
+            metadata = dict(updated.metadata)
+            self._stage_outputs["promote"] = {
+                "status": "completed",
+                "message": f"Branch pushed: {metadata['promotion_branch']}",
+                "artifacts": [],
+                "metrics": {
+                    "review_decision": str(metadata.get("review_decision", "approved")),
+                    "promotion_mode": promotion_mode,
+                    "promotion_branch": str(metadata.get("promotion_branch", "")),
+                    "commit_created": bool(metadata.get("promotion_commit_created", False)),
+                },
+            }
+            self._persist_promotion_metadata(updated)
+            return updated
+
+        metadata = dict(updated.metadata)
+        metadata["promotion_pr_title"] = self._build_pr_title(updated)
+        metadata["promotion_pr_body"] = self._build_pr_body(updated)
+        updated = updated.model_copy(update={"metadata": metadata})
+        updated = self._open_pr(updated)
+        self._persist_promotion_metadata(updated)
+        return updated
+
+    def _push_branch(self, context: AgentContext) -> AgentContext:
+        repo_path = self._promotion_repo_path(context)
+        metadata = dict(context.metadata)
+        branch_name = str(metadata.get("promotion_branch", self._promotion_branch_name(context)))
+        commit_message = self._build_promotion_commit_message(context)
+
+        self._ensure_promotion_branch(repo_path, branch_name)
+        commit_created = self._commit_promotion_changes(repo_path, commit_message)
+        self.workspace_manager.git_tool.push(repo_path, branch_name)
+
+        metadata["promotion_branch"] = branch_name
+        metadata["promotion_commit_message"] = commit_message
+        metadata["promotion_commit_created"] = commit_created
+        metadata["promotion_pushed"] = True
+        return context.model_copy(update={"metadata": metadata})
+
     def _open_pr(self, context: AgentContext) -> AgentContext:
+        if not self._review_allows_promotion(context):
+            metadata = dict(context.metadata)
+            metadata["promotion_skipped_reason"] = self._promotion_blocked_message(context)
+            self._stage_outputs["promote"] = {
+                "status": "blocked",
+                "message": metadata["promotion_skipped_reason"],
+                "artifacts": [],
+                "metrics": {"review_decision": str(metadata.get("review_decision", "unknown"))},
+            }
+            return context.model_copy(update={"metadata": metadata})
         repo_full_name = context.metadata.get("repo_full_name", "")
         if not repo_full_name:
             logger.warning("No repo_full_name in context; skipping PR creation.")
             return context
         try:
             creator = PRCreator()
-            issue_title = context.metadata.get("issue_title", "AutoDev changes")
-            branch_name = context.metadata.get("isolation_branch", "autodev/changes")
+            title = str(context.metadata.get("promotion_pr_title", self._build_pr_title(context)))
+            body = str(context.metadata.get("promotion_pr_body", self._build_pr_body(context)))
+            branch_name = str(
+                context.metadata.get(
+                    "promotion_branch",
+                    context.metadata.get("isolation_branch", "autodev/changes"),
+                )
+            )
             pr_url = creator.create(
                 repo_full_name=repo_full_name,
                 branch_name=branch_name,
-                title=f"[AutoDev] {issue_title}",
-                body="Automated changes generated by AutoDev.",
+                title=title,
+                body=body,
             )
             meta = dict(context.metadata)
             meta["pr_url"] = pr_url
+            meta["promotion_branch"] = branch_name
+            meta["promotion_pr_title"] = title
+            meta["promotion_pr_body"] = body
+            self._stage_outputs["promote"] = {
+                "status": "completed",
+                "message": "Pull request opened.",
+                "artifacts": [],
+                "metrics": {
+                    "review_decision": str(meta.get("review_decision", "approved")),
+                    "promotion_mode": str(meta.get("promotion_mode", "pull_request")),
+                    "promotion_branch": branch_name,
+                },
+            }
             console.print(f"[green]PR opened:[/green] {pr_url}")
             return context.model_copy(update={"metadata": meta})
         except Exception as exc:
             logger.warning("Could not open PR (%s).", exc)
             return context
+
+    def _promotion_mode(self, context: AgentContext) -> str:
+        raw_mode = context.metadata.get("promotion_mode")
+        if raw_mode is None:
+            raw_mode = context.metadata.get("promotion", {}).get("mode", "pull_request")
+        candidate = str(raw_mode or "pull_request").strip().lower()
+        aliases = {
+            "patch": "patch_bundle",
+            "patch_bundle": "patch_bundle",
+            "bundle": "patch_bundle",
+            "branch": "branch_push",
+            "branch_push": "branch_push",
+            "push": "branch_push",
+            "pr": "pull_request",
+            "pull_request": "pull_request",
+            "pull-request": "pull_request",
+        }
+        return aliases.get(candidate, "pull_request")
+
+    def _promotion_progress_message(self, promotion_mode: str) -> str:
+        if promotion_mode == "patch_bundle":
+            return "Creating patch bundle..."
+        if promotion_mode == "branch_push":
+            return "Pushing promotion branch..."
+        return "Opening pull request..."
+
+    def _promotion_branch_name(self, context: AgentContext) -> str:
+        metadata = context.metadata
+        existing = str(
+            metadata.get("promotion_branch", metadata.get("isolation_branch", ""))
+        ).strip()
+        if existing:
+            return existing
+
+        raw_token = str(
+            metadata.get("backlog_item_id")
+            or self._derive_backlog_item_id(context.issue_url)
+            or "changes"
+        ).strip()
+        normalized = SAFE_BACKLOG_TOKEN_PATTERN.sub("-", raw_token.lower()).strip("-._")
+        return f"autodev/{normalized or 'changes'}"
+
+    def _promotion_repo_path(self, context: AgentContext) -> str:
+        repo_path = str(context.repo_path or context.metadata.get("workspace_path", "")).strip()
+        if not repo_path:
+            raise RuntimeError("Promotion requires a repository workspace path.")
+        return repo_path
+
+    def _emit_patch_bundle(self, context: AgentContext) -> Path:
+        diff_path = str(context.metadata.get("implementation_diff_path", "")).strip()
+        patch_text = ""
+        if diff_path:
+            try:
+                patch_text = Path(diff_path).read_text(encoding="utf-8")
+            except OSError:
+                patch_text = ""
+        if not patch_text:
+            patch_text = self._git_stdout(self._promotion_repo_path(context), ["diff", "--binary"])
+
+        run_id = str(context.metadata.get("run_id", "")).strip()
+        if run_id:
+            promotion_dir = self.state_store.run_dir(run_id) / "promotion"
+        else:
+            promotion_dir = Path(self.work_dir) / "promotion"
+        promotion_dir.mkdir(parents=True, exist_ok=True)
+
+        branch_slug = (
+            SAFE_BACKLOG_TOKEN_PATTERN.sub(
+                "-",
+                self._promotion_branch_name(context).replace("/", "-"),
+            ).strip("-._")
+            or "changes"
+        )
+        patch_path = promotion_dir / f"{branch_slug}.patch"
+        patch_path.write_text(patch_text, encoding="utf-8")
+        return patch_path
+
+    def _build_promotion_commit_message(self, context: AgentContext) -> str:
+        issue_title = str(context.metadata.get("issue_title", "")).strip()
+        if issue_title:
+            return f"[AutoDev] {issue_title}"
+        return f"[AutoDev] Apply {context.metadata.get('backlog_item_id', 'changes')}"
+
+    def _build_pr_title(self, context: AgentContext) -> str:
+        issue_title = str(context.metadata.get("issue_title", "")).strip()
+        if issue_title:
+            return f"[AutoDev] {issue_title}"
+        files = list(context.files_modified)
+        if files:
+            return f"[AutoDev] Update {files[0]}"
+        return f"[AutoDev] Promote {context.metadata.get('backlog_item_id', 'changes')}"
+
+    def _build_pr_body(self, context: AgentContext) -> str:
+        metadata = context.metadata
+        summary = str(metadata.get("review_summary", metadata.get("review", ""))).strip()
+        acceptance_criteria = [str(item) for item in metadata.get("acceptance_criteria", [])]
+        files_modified = [str(path) for path in context.files_modified]
+        validation_excerpt = self._validation_summary_line(context.validation_results)
+
+        lines = ["## Summary"]
+        if summary:
+            lines.append(summary)
+        else:
+            lines.append("Automated changes generated by AutoDev.")
+
+        if files_modified:
+            lines.extend(["", "## Files Modified", *[f"- {path}" for path in files_modified]])
+
+        if acceptance_criteria:
+            lines.extend(
+                ["", "## Acceptance Criteria", *[f"- {item}" for item in acceptance_criteria]]
+            )
+
+        if validation_excerpt:
+            lines.extend(["", "## Validation", f"- {validation_excerpt}"])
+
+        artifact_lines = self._promotion_artifact_lines(context)
+        if artifact_lines:
+            lines.extend(["", "## Run Artifacts", *artifact_lines])
+
+        issue_url = str(context.issue_url).strip()
+        if issue_url:
+            lines.extend(["", "## Source", f"- Issue: {issue_url}"])
+
+        return "\n".join(lines).strip()
+
+    def _promotion_artifact_lines(self, context: AgentContext) -> list[str]:
+        metadata = context.metadata
+        artifact_keys = (
+            ("planning_artifact_path", "Planning artifact"),
+            ("implementation_diff_path", "Implementation diff"),
+            ("changed_files_path", "Changed files manifest"),
+            ("validation_result_path", "Validation result"),
+            ("review_result_path", "Review result"),
+        )
+        lines: list[str] = []
+        for key, label in artifact_keys:
+            value = str(metadata.get(key, "")).strip()
+            if value:
+                lines.append(f"- {label}: {value}")
+        return lines
+
+    def _validation_summary_line(self, validation_results: str) -> str:
+        for line in validation_results.splitlines():
+            candidate = line.strip()
+            if candidate:
+                return candidate
+        return ""
+
+    def _persist_promotion_metadata(self, context: AgentContext) -> None:
+        run_id = str(context.metadata.get("run_id", "")).strip()
+        if not run_id:
+            return
+
+        promotion_snapshot = {
+            "mode": self._promotion_mode(context),
+            "branch": str(context.metadata.get("promotion_branch", "")).strip(),
+            "patch_path": str(context.metadata.get("promotion_patch_path", "")).strip(),
+            "pushed": bool(context.metadata.get("promotion_pushed", False)),
+            "commit_message": str(context.metadata.get("promotion_commit_message", "")).strip(),
+            "commit_created": bool(context.metadata.get("promotion_commit_created", False)),
+            "pr_title": str(context.metadata.get("promotion_pr_title", "")).strip(),
+            "pr_body": str(context.metadata.get("promotion_pr_body", "")).strip(),
+            "pr_url": str(context.metadata.get("pr_url", "")).strip(),
+            "skipped_reason": str(context.metadata.get("promotion_skipped_reason", "")).strip(),
+            "recorded_at": utc_now().isoformat(),
+        }
+
+        self.state_store.update_run(
+            run_id,
+            lambda current: current.model_copy(
+                update={
+                    "metadata": {
+                        **current.metadata,
+                        "promotion": promotion_snapshot,
+                        "promotion_branch": promotion_snapshot["branch"],
+                    }
+                }
+            ),
+        )
+
+    def _ensure_promotion_branch(self, repo_path: str, branch_name: str) -> None:
+        current_branch = self._git_stdout(repo_path, ["branch", "--show-current"]).strip()
+        if current_branch == branch_name:
+            return
+
+        try:
+            self._run_git(repo_path, ["checkout", branch_name])
+        except RuntimeError:
+            self._run_git(repo_path, ["checkout", "-b", branch_name])
+
+    def _commit_promotion_changes(self, repo_path: str, commit_message: str) -> bool:
+        status = self._git_stdout(repo_path, ["status", "--short"])
+        if not status.strip():
+            return False
+        self.workspace_manager.git_tool.commit(repo_path, commit_message)
+        return True
+
+    def _git_stdout(self, repo_path: str, args: list[str]) -> str:
+        return self._run_git(repo_path, args)
+
+    def _run_git(self, repo_path: str, args: list[str]) -> str:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", repo_path, *args],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("git executable is not available") from exc
+        if completed.returncode != 0:
+            error = completed.stderr.strip() or completed.stdout.strip() or "git failed"
+            raise RuntimeError(error)
+        return completed.stdout
+
+    def _review_allows_promotion(self, context: AgentContext) -> bool:
+        decision = str(context.metadata.get("review_decision", "")).strip()
+        if not decision:
+            return True
+        return decision == ReviewDecision.APPROVED.value
+
+    def _promotion_blocked_message(self, context: AgentContext) -> str:
+        decision = str(context.metadata.get("review_decision", "unknown")).strip() or "unknown"
+        summary = str(
+            context.metadata.get("review_summary", context.metadata.get("review", ""))
+        ).strip()
+        if summary:
+            return f"Promotion blocked by review decision {decision}: {summary}"
+        return f"Promotion blocked by review decision {decision}."
 
     @property
     def state(self) -> PipelineState:

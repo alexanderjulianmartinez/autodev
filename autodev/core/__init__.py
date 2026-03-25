@@ -1,6 +1,7 @@
 """Core AutoDev runtime components."""
 
 from autodev.core.backlog_service import BacklogService
+from autodev.core.failure_classifier import classify_phase_failure
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseExecutionResult, PhaseRegistry
 from autodev.core.runtime import Orchestrator, PipelineState
 from autodev.core.schemas import (
@@ -57,6 +58,7 @@ __all__ = [
     "TaskResult",
     "TaskStatus",
     "Supervisor",
+    "classify_phase_failure",
     "ValidationCommandResult",
     "ValidationResult",
     "ValidationStatus",
