@@ -142,20 +142,20 @@ def run(
 @app.command(name="fix-ci")
 def fix_ci(
     run_url: str = typer.Argument(..., help="GitHub Actions run URL to fix"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Skip PR creation"),
+    max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
+    work_dir: Optional[str] = typer.Option(None, "--work-dir", help="State directory"),
 ) -> None:
-    """Read CI logs and attempt to patch code (stub)."""
-    console.print(
-        Panel(
-            f"[yellow]fix-ci is not yet implemented.[/yellow]\n\n"
-            f"Run URL: {run_url}\n\n"
-            "This command will:\n"
-            "  1. Read CI failure logs\n"
-            "  2. Identify the failing code\n"
-            "  3. Generate a patch\n"
-            "  4. Open a pull request",
-            title="autodev fix-ci",
-        )
-    )
+    """Read a failed GitHub Actions run and attempt to fix the code."""
+    console.print(f"[bold]Processing CI run:[/bold] {run_url}")
+    orchestrator = _make_orchestrator(work_dir, max_iterations=max_iterations, dry_run=dry_run)
+    try:
+        context = orchestrator.run_ci_pipeline(run_url)
+        if context.metadata.get("pr_url"):
+            console.print(f"\n[green]PR:[/green] {context.metadata['pr_url']}")
+    except Exception as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 # ---------------------------------------------------------------------------

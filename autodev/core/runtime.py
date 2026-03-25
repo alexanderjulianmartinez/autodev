@@ -9,7 +9,7 @@ import re
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from rich.console import Console
@@ -18,6 +18,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from autodev.agents.base import AgentContext
 from autodev.agents.debugger import DebuggerAgent
+from autodev.core.backlog_service import BacklogService
 from autodev.core.failure_classifier import classify_phase_failure
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseRegistry
 from autodev.core.run_reporter import RunReporter
@@ -68,6 +69,7 @@ class Orchestrator:
         self.work_dir = work_dir or tempfile.mkdtemp(prefix="autodev_")
         self.isolation_mode = isolation_mode
         self.state_store = FileStateStore(os.path.join(self.work_dir, "state"))
+        self.backlog_service = BacklogService(self.state_store)
         self.supervisor = Supervisor(
             max_iterations=max_iterations,
             state_store=self.state_store,
@@ -131,11 +133,23 @@ class Orchestrator:
 
     def run_pipeline(self, issue_url: str) -> AgentContext:
         """Execute the full issue → plan → implement → validate → review → PR pipeline."""
-        console.print(Panel(f"[bold cyan]AutoDev Pipeline[/bold cyan]\n{issue_url}", expand=False))
+        return self._run_pipeline_impl(issue_url, self._read_issue)
+
+    def run_ci_pipeline(self, run_url: str) -> AgentContext:
+        """Execute the CI fix pipeline for a failed GitHub Actions run."""
+        return self._run_pipeline_impl(run_url, self._read_ci_run)
+
+    def _run_pipeline_impl(
+        self,
+        entry_url: str,
+        intake_fn: Callable[[AgentContext], AgentContext],
+    ) -> AgentContext:
+        """Shared pipeline body: intake → clone → plan → implement → validate → review → promote."""
+        console.print(Panel(f"[bold cyan]AutoDev Pipeline[/bold cyan]\n{entry_url}", expand=False))
         self._state = PipelineState.RUNNING
         self._stage_outputs.clear()
 
-        context = AgentContext(issue_url=issue_url)
+        context = AgentContext(issue_url=entry_url)
         final_run_status: RunStatus | None = None
 
         try:
@@ -145,9 +159,9 @@ class Orchestrator:
                 transient=True,
                 console=console,
             ) as progress:
-                # 1. Read issue
+                # 1. Intake (issue or CI run)
                 task = progress.add_task("Analyzing issue...", total=None)
-                context = self._read_issue(context)
+                context = intake_fn(context)
                 self._stage_outputs["intake"] = {"status": "completed"}
                 progress.update(task, completed=True)
 
@@ -239,7 +253,7 @@ class Orchestrator:
         except Exception:
             self._state = PipelineState.FAILED
             final_run_status = RunStatus.FAILED
-            logger.exception("Pipeline failed while processing %s", issue_url)
+            logger.exception("Pipeline failed while processing %s", entry_url)
             raise
         finally:
             run_id = context.metadata.get("run_id")
@@ -439,6 +453,24 @@ class Orchestrator:
             return context.model_copy(update={"metadata": meta})
         except Exception as exc:
             logger.warning("Could not read issue (%s); continuing without it.", exc)
+            return context
+
+    def _read_ci_run(self, context: AgentContext) -> AgentContext:
+        from autodev.github.ci_intake import CIIntakeService
+
+        try:
+            intake = CIIntakeService(self.backlog_service)
+            item = intake.intake(context.issue_url)
+            meta = dict(context.metadata)
+            meta["issue_title"] = item.title
+            meta["issue_body"] = item.description
+            meta["repo_full_name"] = item.metadata.get("repo_full_name", "")
+            meta["backlog_item_id"] = item.item_id
+            meta["run_url"] = item.metadata.get("run_url", context.issue_url)
+            meta["validation_commands"] = item.metadata.get("validation_commands", [])
+            return context.model_copy(update={"metadata": meta})
+        except Exception as exc:
+            logger.warning("Could not read CI run (%s); continuing without it.", exc)
             return context
 
     def _start_run(self, context: AgentContext) -> AgentContext:

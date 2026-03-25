@@ -352,6 +352,8 @@ The biggest gaps are:
   - CI logs can be ingested into a backlog item
   - the resulting run follows the standard phase pipeline
   - artifacts clearly distinguish issue-driven and CI-driven runs
+- **Status:** `completed`
+- **Completion notes:** Implemented `CIRunReader` (`autodev/github/ci_runner.py`) and `CIIntakeService` (`autodev/github/ci_intake.py`) following the IssueReader/IssueIntakeService pattern exactly. GitHub Actions run URLs (`https://github.com/<owner>/<repo>/actions/runs/<run_id>`) are parsed, failing jobs/steps fetched via PyGithub, and validation commands inferred from step names. `BacklogItem.source = "github_actions"` distinguishes CI-driven runs. `Orchestrator.run_ci_pipeline()` added; `run_pipeline()` refactored to share a `_run_pipeline_impl(entry_url, intake_fn)` body. Fixed latent bug: `self.backlog_service` was never initialized in `Orchestrator.__init__`. CLI `fix-ci` stub replaced with real implementation. 40 tests added in `tests/test_ci_intake.py` (257 total).
 
 ## Milestone 8: Quality, Testing, and Documentation
 
