@@ -47,6 +47,12 @@ from autodev.models.router import ModelRouter
 logger = logging.getLogger(__name__)
 console = Console()
 SAFE_BACKLOG_TOKEN_PATTERN = re.compile(r"[^a-z0-9._-]+")
+GITHUB_REMOTE_PATTERN = re.compile(
+    r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$",
+    re.IGNORECASE,
+)
+# Matches Jira-style ticket keys: PROJECT-123, MYPROJ-4567, etc.
+JIRA_TICKET_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-\d+$")
 
 
 class PipelineState(str, Enum):
@@ -142,7 +148,14 @@ class Orchestrator:
         return self.run_pipeline(issue_url)
 
     def run_pipeline(self, issue_url: str) -> AgentContext:
-        """Execute the full issue → plan → implement → validate → review → PR pipeline."""
+        """Execute the full issue → plan → implement → validate → review → PR pipeline.
+
+        Accepts either a GitHub issue URL or a Jira ticket key (e.g. ``PROJ-123``).
+        Jira tickets require ``JIRA_BASE_URL``, ``JIRA_EMAIL``, and
+        ``JIRA_API_TOKEN`` environment variables to be set.
+        """
+        if JIRA_TICKET_PATTERN.match(issue_url.strip()):
+            return self._run_pipeline_impl(issue_url.strip(), self._read_jira_ticket)
         return self._run_pipeline_impl(issue_url, self._read_issue)
 
     def run_ci_pipeline(self, run_url: str) -> AgentContext:
@@ -246,6 +259,8 @@ class Orchestrator:
                             description=self._promotion_progress_message(promotion_mode),
                         )
                         context = self._promote(context)
+                        if context.metadata.get("jira_key") and context.metadata.get("pr_url"):
+                            self._post_jira_progress(context)
                 else:
                     self._stage_outputs["promote"] = {
                         "status": "blocked",
@@ -469,6 +484,62 @@ class Orchestrator:
             logger.warning("Could not read issue (%s); continuing without it.", exc)
             return context
 
+    def _read_jira_ticket(self, context: AgentContext) -> AgentContext:
+        """Intake a Jira ticket key (``PROJ-123``) into a BacklogItem."""
+        from autodev.jira.adapters.issue_tracker import JiraIssueTrackerAdapter
+        from autodev.jira.intake import JiraTicketIntakeService
+
+        ticket_key = context.issue_url
+        try:
+            settings = {
+                "base_url": os.environ.get("JIRA_BASE_URL", ""),
+                "email": os.environ.get("JIRA_EMAIL", ""),
+                "api_token": os.environ.get("JIRA_API_TOKEN", ""),
+            }
+            adapter = JiraIssueTrackerAdapter(settings)
+            intake = JiraTicketIntakeService(self.backlog_service, adapter)
+            item = intake.intake(ticket_key)
+            meta = dict(context.metadata)
+            meta["issue_title"] = item.title
+            meta["issue_body"] = item.description
+            meta["repo_full_name"] = item.metadata.get("repo_full_name", "")
+            meta["backlog_item_id"] = item.item_id
+            meta["jira_key"] = ticket_key
+            meta["jira_url"] = item.metadata.get("jira_url", "")
+            meta.setdefault("issue_url", item.metadata.get("jira_url", ticket_key))
+            return context.model_copy(update={"metadata": meta})
+        except Exception as exc:
+            logger.warning("Could not read Jira ticket (%s); continuing without it.", exc)
+            return context
+
+    def _post_jira_progress(self, context: AgentContext) -> None:
+        """Post the opened PR URL back to the originating Jira ticket as a comment."""
+        from autodev.integrations.issue_tracker import UpdateIssueRequest
+        from autodev.jira.adapters.issue_tracker import JiraIssueTrackerAdapter
+
+        ticket_key = str(context.metadata.get("jira_key", ""))
+        pr_url = str(context.metadata.get("pr_url", ""))
+        if not ticket_key or not pr_url:
+            return
+        try:
+            settings = {
+                "base_url": os.environ.get("JIRA_BASE_URL", ""),
+                "email": os.environ.get("JIRA_EMAIL", ""),
+                "api_token": os.environ.get("JIRA_API_TOKEN", ""),
+            }
+            adapter = JiraIssueTrackerAdapter(settings)
+            project_key = ticket_key.split("-")[0]
+            adapter.update_issue(
+                UpdateIssueRequest(
+                    project_id=project_key,
+                    issue_id=ticket_key,
+                    body=f"AutoDev opened a pull request: {pr_url}",
+                )
+            )
+            logger.info("Posted PR link to Jira ticket %s", ticket_key)
+        except Exception as exc:
+            logger.warning("Could not post PR link to Jira ticket %s: %s", ticket_key, exc)
+
     def _read_ci_run(self, context: AgentContext) -> AgentContext:
         from autodev.github.ci_intake import CIIntakeService
 
@@ -518,8 +589,15 @@ class Orchestrator:
             return context
         try:
             run_id = context.metadata.get("run_id")
+            local_source = None
             if run_id:
-                path = str(self.workspace_manager.clone_repo(run_id, repo_full_name))
+                local_source = self._resolve_local_source_repo(repo_full_name)
+                if local_source:
+                    path = str(
+                        self.workspace_manager.prepare_local_repository(run_id, local_source)
+                    )
+                else:
+                    path = str(self.workspace_manager.clone_repo(run_id, repo_full_name))
                 run = self.state_store.load_run(run_id)
             else:
                 cloner = RepoCloner()
@@ -529,6 +607,8 @@ class Orchestrator:
 
             metadata = dict(context.metadata)
             metadata["workspace_path"] = path
+            if local_source:
+                metadata["local_source_path"] = local_source
             if run is not None:
                 isolation_branch = run.metadata.get("isolation_branch")
                 if isolation_branch:
@@ -537,6 +617,45 @@ class Orchestrator:
         except Exception as exc:
             logger.warning("Could not clone repo (%s); continuing.", exc)
             return context
+
+    def _resolve_local_source_repo(self, repo_full_name: str) -> str | None:
+        repo_full_name = str(repo_full_name).strip()
+        if not repo_full_name:
+            return None
+
+        git_root = self._discover_git_root(Path.cwd())
+        if git_root is None:
+            return None
+
+        local_repo_full_name = self._repo_full_name_from_git_remote(git_root)
+        if local_repo_full_name and local_repo_full_name.lower() == repo_full_name.lower():
+            return str(git_root)
+
+        expected_repo_name = repo_full_name.rsplit("/", maxsplit=1)[-1].lower()
+        if self.dry_run and git_root.name.lower() == expected_repo_name:
+            return str(git_root)
+
+        return None
+
+    def _discover_git_root(self, start: Path) -> Path | None:
+        current = start.expanduser().resolve()
+        for candidate in [current, *current.parents]:
+            if (candidate / ".git").exists():
+                return candidate
+        return None
+
+    def _repo_full_name_from_git_remote(self, repo_root: Path) -> str:
+        try:
+            remote_url = self.workspace_manager.git_tool.run_git(
+                ["-C", str(repo_root), "remote", "get-url", "origin"]
+            ).strip()
+        except Exception:
+            return ""
+
+        match = GITHUB_REMOTE_PATTERN.search(remote_url)
+        if not match:
+            return ""
+        return f"{match.group('owner')}/{match.group('repo')}"
 
     def _plan(self, context: AgentContext) -> AgentContext:
         updated = self._execute_phase(PhaseName.PLAN, context)

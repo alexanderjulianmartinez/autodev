@@ -9,6 +9,7 @@ All state-store, workspace, scheduler, and RunReporter logic runs for real.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from autodev.agents.base import AgentContext
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseRegistry
 from autodev.core.runtime import Orchestrator, PipelineState
 from autodev.core.schemas import (
+    IsolationMode,
     PhaseName,
     ReviewDecision,
     RunStatus,
@@ -89,6 +91,34 @@ def _stub_review_approved(self: Any, task: str, context: AgentContext) -> AgentC
 
 def _make_orch(tmp_path: Path) -> Orchestrator:
     return Orchestrator(work_dir=str(tmp_path), dry_run=True)
+
+
+def _init_git_repo(repo_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "config", "user.email", "autodev@example.com"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "AutoDev Tests"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "add", "--all"], cwd=repo_path, check=True, capture_output=True, text=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +317,123 @@ class TestRunPipelineE2E:
             orch.run_pipeline(_ISSUE_URL)
 
         assert orch.state == PipelineState.FAILED
+
+
+class TestSelfHostedDryRunE2E:
+    def test_pipeline_completes_small_self_hosted_text_issue(self, tmp_path, monkeypatch):
+        repo_path = tmp_path / "selfhosted"
+        repo_path.mkdir()
+        (repo_path / "README.md").write_text("# Self Hosted Demo\n", encoding="utf-8")
+        tests_dir = repo_path / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_smoke.py").write_text(
+            "def test_smoke():\n    assert True\n",
+            encoding="utf-8",
+        )
+        _init_git_repo(repo_path)
+
+        orch = _make_orch(tmp_path / "run")
+
+        def _fake_read_issue(ctx: AgentContext) -> AgentContext:
+            meta = dict(ctx.metadata)
+            meta.update(
+                {
+                    "backlog_item_id": "issue-selfhosted-1",
+                    "issue_title": "Document dry run mode",
+                    "issue_body": (
+                        "## Target Files\n"
+                        "- README.md\n\n"
+                        "## Requested Changes\n"
+                        "- Explain that dry-run skips remote promotion.\n"
+                        "- Mention that run artifacts are written under the state directory.\n\n"
+                        "## Acceptance Criteria\n"
+                        "- README.md mentions dry-run skips remote promotion.\n"
+                        "- README.md mentions run artifacts.\n"
+                    ),
+                    "repo_full_name": "example/selfhosted",
+                    "validation_commands": ["pytest -q"],
+                }
+            )
+            return ctx.model_copy(update={"metadata": meta})
+
+        monkeypatch.setattr(orch, "_read_issue", _fake_read_issue)
+        monkeypatch.chdir(repo_path)
+
+        ctx = orch.run_pipeline("https://github.com/example/selfhosted/issues/1")
+
+        run_id = ctx.metadata["run_id"]
+        run = orch.state_store.load_run(run_id)
+        diff_text = Path(ctx.metadata["implementation_diff_path"]).read_text(encoding="utf-8")
+
+        assert orch.state == PipelineState.COMPLETED
+        assert run.status == RunStatus.COMPLETED
+        assert ctx.metadata["review_decision"] == ReviewDecision.APPROVED.value
+        assert ctx.metadata["local_source_path"] == str(repo_path)
+        assert "dry-run skips remote promotion" in diff_text
+        assert "run artifacts are written under the state directory" in diff_text
+        assert orch.stage_outputs["promote"]["status"] == "skipped"
+
+    def test_pipeline_completes_explicit_self_hosted_code_issue(self, tmp_path, monkeypatch):
+        repo_path = tmp_path / "selfhosted-code"
+        repo_path.mkdir()
+        (repo_path / "contracts.py").write_text("", encoding="utf-8")
+        tests_dir = repo_path / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_contracts.py").write_text(
+            "from contracts import CapabilityDescriptor, IntegrationProvider, build_provider\n\n"
+            "def test_scaffolded_symbols_exist():\n"
+            "    assert IntegrationProvider.__name__ == 'IntegrationProvider'\n"
+            "    assert CapabilityDescriptor.__name__ == 'CapabilityDescriptor'\n"
+            "    assert callable(build_provider)\n",
+            encoding="utf-8",
+        )
+        _init_git_repo(repo_path)
+
+        orch = Orchestrator(
+            work_dir=str(tmp_path / "run-code"),
+            dry_run=True,
+            isolation_mode=IsolationMode.BRANCH,
+        )
+
+        def _fake_read_issue(ctx: AgentContext) -> AgentContext:
+            meta = dict(ctx.metadata)
+            meta.update(
+                {
+                    "backlog_item_id": "issue-selfhosted-code-1",
+                    "issue_title": "Scaffold integration contracts",
+                    "issue_body": (
+                        "## Target Files\n"
+                        "- contracts.py\n\n"
+                        "## Requested Changes\n"
+                        "- add protocol IntegrationProvider with fetch and update methods\n"
+                        "- add dataclass CapabilityDescriptor\n"
+                        "- add function build_provider\n\n"
+                        "## Validation Commands\n"
+                        "- pytest tests/test_contracts.py -q\n\n"
+                        "## Acceptance Criteria\n"
+                        "- contracts.py defines IntegrationProvider\n"
+                        "- contracts.py defines CapabilityDescriptor\n"
+                        "- contracts.py defines build_provider\n"
+                    ),
+                    "repo_full_name": "example/selfhosted-code",
+                }
+            )
+            return ctx.model_copy(update={"metadata": meta})
+
+        monkeypatch.setattr(orch, "_read_issue", _fake_read_issue)
+        monkeypatch.chdir(repo_path)
+
+        ctx = orch.run_pipeline("https://github.com/example/selfhosted-code/issues/2")
+        diff_text = Path(ctx.metadata["implementation_diff_path"]).read_text(encoding="utf-8")
+
+        assert orch.state == PipelineState.COMPLETED
+        assert ctx.metadata["execution_strategy"] == "code_scaffold"
+        assert ctx.metadata["review_decision"] == ReviewDecision.APPROVED.value
+        assert ctx.validation_results.startswith("PASSED")
+        assert "class IntegrationProvider(Protocol):" in diff_text
+        assert "@dataclass" in diff_text
+        assert "def build_provider() -> None:" in diff_text
+        assert orch.stage_outputs["promote"]["status"] == "skipped"
 
 
 # ---------------------------------------------------------------------------

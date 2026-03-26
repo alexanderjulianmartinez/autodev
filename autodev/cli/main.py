@@ -182,7 +182,9 @@ def init() -> None:
 
 @app.command()
 def run(
-    issue_url: str = typer.Argument(..., help="GitHub issue URL to process"),
+    issue_url: str = typer.Argument(
+        ..., help="GitHub issue URL or Jira ticket key (e.g. PROJ-123)"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Skip PR creation"),
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
     work_dir: Optional[str] = typer.Option(None, "--work-dir", help="State directory"),
@@ -193,7 +195,7 @@ def run(
         None, "--config", help="Path to pipeline config YAML (default: auto-discover)"
     ),
 ) -> None:
-    """Run the full AutoDev pipeline for a GitHub issue."""
+    """Run the full AutoDev pipeline for a GitHub issue or Jira ticket."""
     _run_issue(
         issue_url,
         dry_run=dry_run,
@@ -492,7 +494,9 @@ def backlog_list(
 
 @run_app.command(name="start")
 def run_start(
-    issue_url: str = typer.Argument(..., help="GitHub issue URL to process"),
+    issue_url: str = typer.Argument(
+        ..., help="GitHub issue URL or Jira ticket key (e.g. PROJ-123)"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Skip PR creation"),
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
     work_dir: Optional[str] = typer.Option(None, "--work-dir", help="State directory"),
@@ -503,7 +507,7 @@ def run_start(
         None, "--config", help="Path to pipeline config YAML (default: auto-discover)"
     ),
 ) -> None:
-    """Start a new pipeline run for a GitHub issue."""
+    """Start a new pipeline run for a GitHub issue or Jira ticket."""
     _run_issue(
         issue_url,
         dry_run=dry_run,

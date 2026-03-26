@@ -1,6 +1,7 @@
 """Tests for tool components."""
 
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -237,6 +238,34 @@ class TestTestRunner:
         assert result.profiles == ["explicit"]
         assert result.commands[0].command == "pytest test_sample.py -q"
 
+    def test_run_validation_executes_pytest_with_active_interpreter(self, monkeypatch, tmp_path):
+        runner = TestRunner()
+        captured: dict[str, object] = {}
+
+        class Completed:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            captured["kwargs"] = kwargs
+            return Completed()
+
+        monkeypatch.setattr("autodev.tools.test_runner.subprocess.run", fake_run)
+
+        result = runner.run_validation(
+            repo_path=str(tmp_path),
+            task_id="validate-explicit",
+            explicit_commands=["pytest test_sample.py -q"],
+        )
+
+        assert result.status == ValidationStatus.PASSED
+        assert result.commands[0].command == "pytest test_sample.py -q"
+        assert captured["command"] == shlex.join(
+            [sys.executable, "-m", "pytest", "test_sample.py", "-q"]
+        )
+
     def test_run_validation_derives_targeted_pytest_from_changed_files(self, tmp_path):
         runner = TestRunner()
         source_file = tmp_path / "auth.py"
@@ -364,7 +393,7 @@ class TestGitTool:
 
         class FakeRepo:
             @staticmethod
-            def clone_from(_repo_url, _dest_path):
+            def clone_from(_repo_url, _dest_path, **_kwargs):
                 return None
 
         fake_git_module = type("FakeGitModule", (), {"Repo": FakeRepo})()
@@ -382,7 +411,7 @@ class TestGitTool:
 
         class FakeRepo:
             @staticmethod
-            def clone_from(_repo_url, _dest_path):
+            def clone_from(_repo_url, _dest_path, **_kwargs):
                 raise Exception(
                     "fatal: could not read Username for "
                     "'https://ghp_secret-token@github.com/octocat/Hello-World.git': auth failed"

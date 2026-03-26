@@ -16,6 +16,24 @@ from autodev.tools.filesystem_tool import FilesystemTool
 logger = logging.getLogger(__name__)
 PLAN_FILE_PATTERN = re.compile(r"(?P<path>[A-Za-z0-9_./-]+\.[A-Za-z0-9_-]+)")
 SUPPORTED_TEXT_SUFFIXES = {".py", ".md", ".rst", ".txt", ".yaml", ".yml", ".json", ".toml"}
+REQUESTED_TEXT_UPDATE_SUFFIXES = {".md", ".rst", ".txt"}
+REQUESTED_CODE_UPDATE_SUFFIXES = {".py"}
+PROTOCOL_PATTERN = re.compile(
+    r"\b(?:add|create|define|introduce)\b.*\b(?:protocol|interface)\s+(?P<name>[A-Z][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+DATACLASS_PATTERN = re.compile(
+    r"\b(?:add|create|define|introduce)\b.*\bdataclass\s+(?P<name>[A-Z][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+CLASS_PATTERN = re.compile(
+    r"\b(?:add|create|define|introduce)\b.*\bclass\s+(?P<name>[A-Z][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+FUNCTION_PATTERN = re.compile(
+    r"\b(?:add|create|define|introduce)\b.*\bfunction\s+(?P<name>[a-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
 
 
 class CoderAgent(Agent):
@@ -147,11 +165,19 @@ class CoderAgent(Agent):
             original_content = tool.read_file(relative_path)
             snapshot_path = self._snapshot_existing_file(context, target)
 
-        updated_content = self._build_updated_content(
-            relative_path=relative_path,
-            current_content=original_content,
-            context=context,
-        )
+        has_structured_changes = bool(self._requested_changes(context))
+        if self.model_router is not None and not has_structured_changes:
+            updated_content = self._generate_code_with_model(
+                relative_path=relative_path,
+                current_content=original_content,
+                context=context,
+            )
+        else:
+            updated_content = self._build_updated_content(
+                relative_path=relative_path,
+                current_content=original_content,
+                context=context,
+            )
         tool.write_file(relative_path, updated_content)
 
         return {
@@ -227,6 +253,45 @@ class CoderAgent(Agent):
             return ""
         return path.as_posix()
 
+    def _generate_code_with_model(
+        self,
+        *,
+        relative_path: str,
+        current_content: str,
+        context: AgentContext,
+    ) -> str:
+        """Call the LLM to generate updated file content; fall back to annotation on failure."""
+        plan_text = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(context.plan))
+        issue_title = context.metadata.get("issue_title", "")
+        issue_body = context.metadata.get("issue_body", "")
+        criteria = "\n".join(f"  - {c}" for c in context.metadata.get("acceptance_criteria", []))
+        description_section = f"Description:\n{issue_body}\n" if issue_body else ""
+        criteria_section = f"Acceptance criteria:\n{criteria}\n" if criteria else ""
+        prompt = (
+            f"You are implementing a GitHub issue. Return ONLY the complete updated file "
+            f"content for `{relative_path}`. No explanation, no markdown fences.\n\n"
+            f"Issue: {issue_title}\n\n"
+            f"{description_section}"
+            f"{criteria_section}"
+            f"Plan:\n{plan_text}\n\n"
+            f"Current file content:\n{current_content or '(empty file)'}"
+        )
+        try:
+            generated = self.model_router.generate(prompt, model_key="coder")
+            if generated and generated.strip():
+                return generated
+        except Exception as exc:
+            logger.warning(
+                "LLM code generation failed for %s: %s; falling back to annotation.",
+                relative_path,
+                exc,
+            )
+        return self._build_updated_content(
+            relative_path=relative_path,
+            current_content=current_content,
+            context=context,
+        )
+
     def _build_updated_content(
         self,
         *,
@@ -236,6 +301,22 @@ class CoderAgent(Agent):
     ) -> str:
         suffix = Path(relative_path).suffix.lower()
         note = self._implementation_note(context)
+        requested_changes = self._requested_changes(context)
+
+        if requested_changes and suffix in REQUESTED_CODE_UPDATE_SUFFIXES:
+            return self._build_requested_python_update(
+                current_content=current_content,
+                note=note,
+                requested_changes=requested_changes,
+            )
+
+        if requested_changes and suffix in REQUESTED_TEXT_UPDATE_SUFFIXES:
+            return self._build_requested_text_update(
+                current_content=current_content,
+                note=note,
+                requested_changes=requested_changes,
+                suffix=suffix,
+            )
 
         if suffix == ".json":
             return self._update_json_content(current_content, note)
@@ -257,6 +338,194 @@ class CoderAgent(Agent):
         return self._append_line_based_content(
             current_content, f"\n# AutoDev implementation note: {note}\n"
         )
+
+    def _requested_changes(self, context: AgentContext) -> list[str]:
+        raw_changes = context.metadata.get("requested_changes", [])
+        changes: list[str] = []
+        for raw_change in raw_changes:
+            candidate = str(raw_change).strip()
+            if candidate and candidate not in changes:
+                changes.append(candidate)
+        return changes
+
+    def _build_requested_text_update(
+        self,
+        *,
+        current_content: str,
+        note: str,
+        requested_changes: list[str],
+        suffix: str,
+    ) -> str:
+        title = note or "AutoDev Requested Updates"
+        bullet_lines = [f"- {change}" for change in requested_changes]
+        missing_bullets = [bullet for bullet in bullet_lines if bullet not in current_content]
+        if not missing_bullets and title in current_content:
+            return current_content
+
+        if suffix == ".md":
+            header = f"## {title}"
+        elif suffix == ".rst":
+            header = f"{title}\n{'=' * len(title)}"
+        else:
+            header = f"{title}:"
+
+        if header in current_content:
+            if not missing_bullets:
+                return current_content
+            addition = "\n" + "\n".join(missing_bullets) + "\n"
+            return self._append_line_based_content(current_content, addition)
+
+        block = "\n".join([header, "", *bullet_lines]).rstrip() + "\n"
+        return self._append_line_based_content(current_content, f"\n{block}")
+
+    def _build_requested_python_update(
+        self,
+        *,
+        current_content: str,
+        note: str,
+        requested_changes: list[str],
+    ) -> str:
+        symbols = self._python_symbol_specs(requested_changes)
+        if not symbols:
+            commented_changes = "\n".join(f"# - {change}" for change in requested_changes)
+            block = f"\n# AutoDev requested code updates: {note}\n{commented_changes}\n"
+            return self._append_line_based_content(current_content, block)
+
+        content = current_content
+        required_imports: dict[str, set[str]] = {
+            "typing": set(),
+            "dataclasses": set(),
+        }
+        blocks: list[str] = []
+
+        for spec in symbols:
+            if self._python_symbol_exists(content, spec["name"]):
+                continue
+            block, imports = self._python_block_for_spec(spec)
+            for module_name, names in imports.items():
+                required_imports[module_name].update(names)
+            blocks.append(block)
+
+        if not blocks:
+            return content
+
+        content = self._ensure_python_imports(content, required_imports)
+        appended = "\n\n".join(blocks).rstrip() + "\n"
+        return self._append_line_based_content(content, f"\n\n{appended}")
+
+    def _python_symbol_specs(self, requested_changes: list[str]) -> list[dict[str, str]]:
+        specs: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for change in requested_changes:
+            for kind, pattern in [
+                ("protocol", PROTOCOL_PATTERN),
+                ("dataclass", DATACLASS_PATTERN),
+                ("class", CLASS_PATTERN),
+                ("function", FUNCTION_PATTERN),
+            ]:
+                for match in pattern.finditer(change):
+                    name = match.group("name")
+                    key = (kind, name)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    specs.append({"kind": kind, "name": name, "request": change})
+        return specs
+
+    def _python_symbol_exists(self, current_content: str, symbol_name: str) -> bool:
+        patterns = [
+            rf"^class\s+{re.escape(symbol_name)}\b",
+            rf"^def\s+{re.escape(symbol_name)}\b",
+        ]
+        return any(re.search(pattern, current_content, flags=re.MULTILINE) for pattern in patterns)
+
+    def _python_block_for_spec(
+        self,
+        spec: dict[str, str],
+    ) -> tuple[str, dict[str, set[str]]]:
+        kind = spec["kind"]
+        name = spec["name"]
+        request = spec["request"]
+        summary = request.rstrip(".")
+        if kind == "protocol":
+            methods = self._protocol_methods(request)
+            body = "\n".join(f"    {signature}" for signature in methods) if methods else "    ..."
+            return (
+                f'class {name}(Protocol):\n    """{summary}."""\n{body}',
+                {"typing": {"Protocol"}, "dataclasses": set()},
+            )
+        if kind == "dataclass":
+            field_line = self._dataclass_field_line(name)
+            return (
+                f'@dataclass\nclass {name}:\n    """{summary}."""\n    {field_line}',
+                {"typing": set(), "dataclasses": {"dataclass"}},
+            )
+        if kind == "class":
+            return (
+                f'class {name}:\n    """{summary}."""\n\n    pass',
+                {"typing": set(), "dataclasses": set()},
+            )
+        return (
+            f'def {name}() -> None:\n    """{summary}."""\n\n    ...',
+            {"typing": set(), "dataclasses": set()},
+        )
+
+    def _protocol_methods(self, request: str) -> list[str]:
+        lowered = request.lower()
+        methods: list[str] = []
+        for method_name, signature in [
+            ("fetch", "def fetch(self, identifier: str) -> object: ..."),
+            ("update", "def update(self, identifier: str, payload: object) -> object: ..."),
+            ("execute", "def execute(self, command: str, payload: object = None) -> object: ..."),
+            ("capability", "def capabilities(self) -> tuple[str, ...]: ..."),
+            ("discover", "def discover_capabilities(self) -> tuple[str, ...]: ..."),
+        ]:
+            if method_name in lowered:
+                methods.append(signature)
+        return methods
+
+    def _dataclass_field_line(self, name: str) -> str:
+        lowered = name.lower()
+        if lowered.endswith(("request", "response", "result", "event", "metadata")):
+            return "payload: dict[str, object]"
+        if "capability" in lowered:
+            return "name: str"
+        return "name: str"
+
+    def _ensure_python_imports(
+        self,
+        current_content: str,
+        required_imports: dict[str, set[str]],
+    ) -> str:
+        content = current_content
+        for module_name, names in required_imports.items():
+            if not names:
+                continue
+            sorted_names = sorted(names)
+            import_line = f"from {module_name} import {', '.join(sorted_names)}"
+            if import_line in content:
+                continue
+            content = self._insert_python_import(content, import_line)
+        return content
+
+    def _insert_python_import(self, current_content: str, import_line: str) -> str:
+        if not current_content.strip():
+            return f"{import_line}\n"
+
+        lines = current_content.splitlines()
+        insert_at = 0
+        if lines and lines[0].startswith('"""'):
+            insert_at = 1
+            while insert_at < len(lines) and not lines[insert_at - 1].rstrip().endswith('"""'):
+                insert_at += 1
+            while insert_at < len(lines) and lines[insert_at].strip() == "":
+                insert_at += 1
+        while insert_at < len(lines) and (
+            lines[insert_at].startswith("from ") or lines[insert_at].startswith("import ")
+        ):
+            insert_at += 1
+        lines.insert(insert_at, import_line)
+        return "\n".join(lines).rstrip() + "\n"
 
     def _append_line_based_content(self, current_content: str, addition: str) -> str:
         if current_content and not current_content.endswith("\n"):

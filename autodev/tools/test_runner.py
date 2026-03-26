@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -251,13 +252,14 @@ class TestRunner(Tool):
 
     def _run_validation_command(self, *, repo_path: str, command: str) -> ValidationCommandResult:
         logger.info("Running tests in %r with command %r", repo_path, command)
-        is_safe, reason = self.supervisor.validate_command(command)
+        executed_command = self._rewrite_command_for_environment(command)
+        is_safe, reason = self.supervisor.validate_command(executed_command)
         self.supervisor.record_decision(
             operation="test_command",
             target=command,
             allowed=is_safe,
             reason=reason,
-            metadata={"repo_path": repo_path},
+            metadata={"repo_path": repo_path, "executed_command": executed_command},
         )
         if not is_safe:
             return ValidationCommandResult(
@@ -271,7 +273,7 @@ class TestRunner(Tool):
         started = perf_counter()
         try:
             proc = subprocess.run(
-                command,
+                executed_command,
                 shell=True,
                 cwd=repo_path,
                 capture_output=True,
@@ -306,3 +308,18 @@ class TestRunner(Tool):
                 stderr=str(exc),
                 duration_seconds=perf_counter() - started,
             )
+
+    def _rewrite_command_for_environment(self, command: str) -> str:
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            return command
+        if not tokens:
+            return command
+
+        executable = tokens[0].lower()
+        if executable in {"pytest", "pytest.exe"}:
+            return shlex.join([sys.executable, "-m", "pytest", *tokens[1:]])
+        if executable in {"python", "python3", "python.exe", "python3.exe"}:
+            return shlex.join([sys.executable, *tokens[1:]])
+        return command
