@@ -1,6 +1,7 @@
 """Core AutoDev runtime components."""
 
 from autodev.core.backlog_service import BacklogService
+from autodev.core.config import ConfigError, PipelineConfig, RetryConfig, ValidationConfig
 from autodev.core.failure_classifier import classify_phase_failure
 from autodev.core.phase_registry import PhaseExecutionPayload, PhaseExecutionResult, PhaseRegistry
 from autodev.core.run_reporter import RunReporter
@@ -33,6 +34,10 @@ from autodev.core.workspace_manager import WorkspaceManager
 
 __all__ = [
     "BacklogService",
+    "ConfigError",
+    "PipelineConfig",
+    "RetryConfig",
+    "ValidationConfig",
     "BacklogItem",
     "BacklogStatus",
     "FailureClass",

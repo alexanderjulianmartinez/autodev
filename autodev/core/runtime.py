@@ -9,7 +9,10 @@ import re
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    from autodev.core.config import PipelineConfig
 from urllib.parse import urlparse
 
 from rich.console import Console
@@ -62,7 +65,14 @@ class Orchestrator:
         dry_run: bool = False,
         work_dir: str | None = None,
         isolation_mode: IsolationMode = IsolationMode.SNAPSHOT,
+        pipeline_config: Optional["PipelineConfig"] = None,
     ) -> None:
+        from autodev.core.config import PipelineConfig as _PipelineConfig
+
+        # pipeline_config provides validation/retry settings.
+        # The explicit kwargs (max_iterations, dry_run, isolation_mode) always
+        # take precedence — they represent caller intent (e.g. CLI flags).
+        self.pipeline_config: _PipelineConfig = pipeline_config or _PipelineConfig()
         self.task_graph = TaskGraph.default_pipeline()
         self.model_router = ModelRouter()
         self.dry_run = dry_run
@@ -149,7 +159,10 @@ class Orchestrator:
         self._state = PipelineState.RUNNING
         self._stage_outputs.clear()
 
-        context = AgentContext(issue_url=entry_url)
+        # Seed context with validation settings from pipeline_config.
+        # Intake metadata (from GitHub issue / CI run) takes precedence via setdefault.
+        _cfg_meta = self.pipeline_config.as_context_metadata()
+        context = AgentContext(issue_url=entry_url, metadata=_cfg_meta)
         final_run_status: RunStatus | None = None
 
         try:
@@ -160,6 +173,7 @@ class Orchestrator:
                 console=console,
             ) as progress:
                 # 1. Intake (issue or CI run)
+                # Config defaults are seeded into context; intake adds on top.
                 task = progress.add_task("Analyzing issue...", total=None)
                 context = intake_fn(context)
                 self._stage_outputs["intake"] = {"status": "completed"}

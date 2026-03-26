@@ -372,6 +372,7 @@ The biggest gaps are:
 
 ### AD-026 Add configuration support for pipelines, validation profiles, isolation mode, and retry policy
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:core`
 - **Problem:** Current config is minimal and does not represent the runtime controls described in the design.
@@ -380,6 +381,7 @@ The biggest gaps are:
   - config files map cleanly to runtime models
   - invalid config fails early with clear errors
   - defaults are safe and documented
+- **Completion notes:** Created `autodev/core/config.py` with Pydantic models `PipelineConfig`, `ValidationConfig`, `RetryConfig`, and `ConfigError`. Config is loaded from `./autodev.yaml` or `~/.autodev/pipeline.yaml` (auto-discovery) or an explicit `--config` flag. Invalid YAML, unknown keys, and out-of-range values all raise `ConfigError` at startup with field-level error messages. `Orchestrator` now accepts a `pipeline_config` kwarg and seeds validation settings (`validation_breadth`, `validation_stop_on_first_failure`, `validation_commands`) into the context metadata before intake runs. CLI commands `run`, `fix-ci`, `run start`, `run resume` gained `--config` and `--isolation-mode` flags. `autodev status` shows the active config file and its key settings. Reference config documented at `configs/pipeline.yaml`. 43 new tests in `tests/test_config.py`.
 
 ### AD-027 Document local development, architecture, and contribution workflows
 

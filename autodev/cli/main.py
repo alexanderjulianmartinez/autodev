@@ -43,17 +43,68 @@ def _state_dir(work_dir: Optional[str]) -> str:
     return str(_DEFAULT_STATE_DIR)
 
 
+def _load_pipeline_config(
+    config_path: Optional[str],
+    isolation_mode: Optional[str],
+    max_iterations: int,
+    dry_run: bool,
+) -> "PipelineConfig":
+    """Load PipelineConfig from file (or auto-discover), then apply CLI overrides."""
+    from autodev.core.config import ConfigError, PipelineConfig
+    from autodev.core.schemas import IsolationMode
+
+    if config_path:
+        try:
+            cfg = PipelineConfig.load(config_path)
+        except ConfigError as exc:
+            console.print(f"[red]Config error:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+    else:
+        try:
+            cfg = PipelineConfig.discover()
+        except ConfigError as exc:
+            console.print(f"[red]Config error:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+
+    overrides: dict = {"max_iterations": max_iterations, "dry_run": dry_run}
+    if isolation_mode is not None:
+        try:
+            overrides["isolation_mode"] = IsolationMode(isolation_mode.lower())
+        except ValueError:
+            valid = ", ".join(m.value for m in IsolationMode)
+            console.print(f"[red]Invalid isolation mode:[/red] {isolation_mode!r}. Choose: {valid}")
+            raise typer.Exit(code=1) from None
+    return cfg.model_copy(update=overrides)
+
+
+# Keep the type annotation available at runtime for the helper above.
+try:
+    from autodev.core.config import PipelineConfig
+except ImportError:
+    PipelineConfig = None  # type: ignore[assignment,misc]
+
+
 def _make_orchestrator(
     work_dir: Optional[str] = None,
     max_iterations: int = 3,
     dry_run: bool = False,
+    isolation_mode: Optional[str] = None,
+    config_path: Optional[str] = None,
 ):
     from autodev.core.runtime import Orchestrator
 
-    return Orchestrator(
+    cfg = _load_pipeline_config(
+        config_path=config_path,
+        isolation_mode=isolation_mode,
         max_iterations=max_iterations,
         dry_run=dry_run,
+    )
+    return Orchestrator(
+        max_iterations=cfg.max_iterations,
+        dry_run=cfg.dry_run,
         work_dir=_state_dir(work_dir),
+        isolation_mode=cfg.isolation_mode,
+        pipeline_config=cfg,
     )
 
 
@@ -89,25 +140,31 @@ def init() -> None:
             "  default: gpt-4.1\n"
         )
 
-    pipelines_yaml = _CONFIG_DIR / "pipelines.yaml"
-    if not pipelines_yaml.exists():
-        pipelines_yaml.write_text(
-            "pipelines:\n"
-            "  default:\n"
-            "    name: minimal\n"
-            "    max_iterations: 3\n"
-            "    stages:\n"
-            "      - name: plan\n"
-            "        agent: planner\n"
-            "      - name: implement\n"
-            "        agent: implementer\n"
-            "        depends_on: [plan]\n"
-            "      - name: validate\n"
-            "        agent: validator\n"
-            "        depends_on: [implement]\n"
-            "      - name: review\n"
-            "        agent: reviewer\n"
-            "        depends_on: [validate]\n"
+    pipeline_yaml = _CONFIG_DIR / "pipeline.yaml"
+    if not pipeline_yaml.exists():
+        pipeline_yaml.write_text(
+            "# AutoDev pipeline configuration\n"
+            "# All fields are optional; omit any key to use its safe default.\n"
+            "\n"
+            "# Workspace isolation: snapshot | branch | worktree\n"
+            "isolation_mode: snapshot\n"
+            "\n"
+            "# Max debug/repair iterations per run\n"
+            "max_iterations: 3\n"
+            "\n"
+            "# Skip PR creation and external side-effects\n"
+            "dry_run: false\n"
+            "\n"
+            "validation:\n"
+            "  # targeted | broader-fallback\n"
+            "  breadth: targeted\n"
+            "  stop_on_first_failure: true\n"
+            "  # Explicit commands; leave empty to auto-detect\n"
+            "  commands: []\n"
+            "\n"
+            "retry:\n"
+            "  max_retries: 0\n"
+            "  backoff_base: 2.0\n"
         )
 
     console.print(
@@ -129,9 +186,22 @@ def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Skip PR creation"),
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
     work_dir: Optional[str] = typer.Option(None, "--work-dir", help="State directory"),
+    isolation_mode: Optional[str] = typer.Option(
+        None, "--isolation-mode", help="Workspace isolation: snapshot, branch, worktree"
+    ),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Path to pipeline config YAML (default: auto-discover)"
+    ),
 ) -> None:
     """Run the full AutoDev pipeline for a GitHub issue."""
-    _run_issue(issue_url, dry_run=dry_run, max_iterations=max_iterations, work_dir=work_dir)
+    _run_issue(
+        issue_url,
+        dry_run=dry_run,
+        max_iterations=max_iterations,
+        work_dir=work_dir,
+        isolation_mode=isolation_mode,
+        config_path=config,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -145,10 +215,22 @@ def fix_ci(
     dry_run: bool = typer.Option(False, "--dry-run", help="Skip PR creation"),
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
     work_dir: Optional[str] = typer.Option(None, "--work-dir", help="State directory"),
+    isolation_mode: Optional[str] = typer.Option(
+        None, "--isolation-mode", help="Workspace isolation: snapshot, branch, worktree"
+    ),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Path to pipeline config YAML (default: auto-discover)"
+    ),
 ) -> None:
     """Read a failed GitHub Actions run and attempt to fix the code."""
     console.print(f"[bold]Processing CI run:[/bold] {run_url}")
-    orchestrator = _make_orchestrator(work_dir, max_iterations=max_iterations, dry_run=dry_run)
+    orchestrator = _make_orchestrator(
+        work_dir,
+        max_iterations=max_iterations,
+        dry_run=dry_run,
+        isolation_mode=isolation_mode,
+        config_path=config,
+    )
     try:
         context = orchestrator.run_ci_pipeline(run_url)
         if context.metadata.get("pr_url"):
@@ -166,6 +248,8 @@ def fix_ci(
 @app.command()
 def status() -> None:
     """Show current AutoDev configuration and status."""
+    from autodev.core.config import _CONFIG_SEARCH_PATHS, PipelineConfig
+
     table = Table(show_header=False, box=None)
     table.add_column("Key", style="bold")
     table.add_column("Value")
@@ -173,6 +257,24 @@ def status() -> None:
     config_exists = _CONFIG_DIR.exists()
     table.add_row("Config dir", f"{_CONFIG_DIR} ({'exists' if config_exists else 'not found'})")
     table.add_row("State dir", str(_DEFAULT_STATE_DIR))
+
+    # Show which pipeline config file is active
+    active_cfg: Optional[str] = None
+    for candidate in _CONFIG_SEARCH_PATHS:
+        if candidate.exists():
+            active_cfg = str(candidate)
+            break
+    table.add_row(
+        "Pipeline config",
+        active_cfg if active_cfg else "[dim]none (using defaults)[/dim]",
+    )
+
+    # Show key settings from active config
+    cfg = PipelineConfig.discover()
+    table.add_row("Isolation mode", cfg.isolation_mode.value)
+    table.add_row("Max iterations", str(cfg.max_iterations))
+    table.add_row("Dry run", str(cfg.dry_run))
+    table.add_row("Validation breadth", cfg.validation.breadth)
 
     for env_var in ("GITHUB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
         value = "[green]set[/green]" if os.environ.get(env_var) else "[red]not set[/red]"
@@ -394,9 +496,22 @@ def run_start(
     dry_run: bool = typer.Option(False, "--dry-run", help="Skip PR creation"),
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
     work_dir: Optional[str] = typer.Option(None, "--work-dir", help="State directory"),
+    isolation_mode: Optional[str] = typer.Option(
+        None, "--isolation-mode", help="Workspace isolation: snapshot, branch, worktree"
+    ),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Path to pipeline config YAML (default: auto-discover)"
+    ),
 ) -> None:
     """Start a new pipeline run for a GitHub issue."""
-    _run_issue(issue_url, dry_run=dry_run, max_iterations=max_iterations, work_dir=work_dir)
+    _run_issue(
+        issue_url,
+        dry_run=dry_run,
+        max_iterations=max_iterations,
+        work_dir=work_dir,
+        isolation_mode=isolation_mode,
+        config_path=config,
+    )
 
 
 @run_app.command(name="resume")
@@ -405,10 +520,22 @@ def run_resume(
     dry_run: bool = typer.Option(False, "--dry-run", help="Skip PR creation"),
     max_iterations: int = typer.Option(3, "--max-iterations", help="Max debug iterations"),
     work_dir: Optional[str] = typer.Option(None, "--work-dir", help="State directory"),
+    isolation_mode: Optional[str] = typer.Option(
+        None, "--isolation-mode", help="Workspace isolation: snapshot, branch, worktree"
+    ),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Path to pipeline config YAML (default: auto-discover)"
+    ),
 ) -> None:
     """Resume an interrupted pipeline run."""
     console.print(f"[bold]Resuming run:[/bold] {run_id}")
-    orchestrator = _make_orchestrator(work_dir, max_iterations=max_iterations, dry_run=dry_run)
+    orchestrator = _make_orchestrator(
+        work_dir,
+        max_iterations=max_iterations,
+        dry_run=dry_run,
+        isolation_mode=isolation_mode,
+        config_path=config,
+    )
     try:
         context = orchestrator.resume_pipeline(run_id)
         if context.metadata.get("pr_url"):
@@ -435,9 +562,17 @@ def _run_issue(
     dry_run: bool,
     max_iterations: int,
     work_dir: Optional[str],
+    isolation_mode: Optional[str] = None,
+    config_path: Optional[str] = None,
 ) -> None:
     console.print(f"[bold]Processing:[/bold] {issue_url}")
-    orchestrator = _make_orchestrator(work_dir, max_iterations=max_iterations, dry_run=dry_run)
+    orchestrator = _make_orchestrator(
+        work_dir,
+        max_iterations=max_iterations,
+        dry_run=dry_run,
+        isolation_mode=isolation_mode,
+        config_path=config_path,
+    )
     try:
         context = orchestrator.run_pipeline(issue_url)
         if context.metadata.get("pr_url"):
