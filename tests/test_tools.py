@@ -393,7 +393,7 @@ class TestGitTool:
 
         class FakeRepo:
             @staticmethod
-            def clone_from(_repo_url, _dest_path):
+            def clone_from(_repo_url, _dest_path, **_kwargs):
                 return None
 
         fake_git_module = type("FakeGitModule", (), {"Repo": FakeRepo})()
@@ -411,7 +411,7 @@ class TestGitTool:
 
         class FakeRepo:
             @staticmethod
-            def clone_from(_repo_url, _dest_path):
+            def clone_from(_repo_url, _dest_path, **_kwargs):
                 raise Exception(
                     "fatal: could not read Username for "
                     "'https://ghp_secret-token@github.com/octocat/Hello-World.git': auth failed"

@@ -7,7 +7,6 @@ manager that returns pre-baked responses.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -30,7 +29,6 @@ from autodev.jira.adapters.issue_tracker import (
     build_jira_issue_tracker_adapter,
 )
 from autodev.jira.intake import JiraTicketIntakeService, _derive_item_id, _extract_repo
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -238,7 +236,9 @@ class TestProtocolCompliance:
 class TestFetchIssue:
     def _fetch(self, payload: dict[str, Any]) -> IssueInfo:
         adapter = _make_adapter()
-        with patch.object(adapter, "_client", return_value=_MockClient({"GET /issue/PROJ-123": payload})):
+        with patch.object(
+            adapter, "_client", return_value=_MockClient({"GET /issue/PROJ-123": payload})
+        ):
             return adapter.fetch_issue(FetchIssueRequest(project_id="PROJ", issue_id="PROJ-123"))
 
     def test_returns_issue_info(self):
@@ -375,9 +375,7 @@ class TestCreateIssue:
         assert result.title == "My title"
 
     def test_labels_passed_through(self):
-        result = self._create(
-            CreateIssueRequest(project_id="PROJ", title="T", labels=["backend"])
-        )
+        result = self._create(CreateIssueRequest(project_id="PROJ", title="T", labels=["backend"]))
         # Labels come back from the fetched full payload which has no labels — just check no error
         assert isinstance(result.labels, list)
 
@@ -406,7 +404,9 @@ class TestUpdateIssue:
 
     def test_returns_issue_info(self):
         result = self._update(
-            UpdateIssueRequest(project_id="PROJ", issue_id="PROJ-123", body="PR: https://example.com/pr/1")
+            UpdateIssueRequest(
+                project_id="PROJ", issue_id="PROJ-123", body="PR: https://example.com/pr/1"
+            )
         )
         assert isinstance(result, IssueInfo)
 
@@ -446,9 +446,7 @@ class TestUpdateIssue:
         adapter = _make_adapter()
         with patch.object(adapter, "_client", return_value=_MockClient(responses)):
             result = adapter.update_issue(
-                UpdateIssueRequest(
-                    project_id="PROJ", issue_id="PROJ-123", status="done"
-                )
+                UpdateIssueRequest(project_id="PROJ", issue_id="PROJ-123", status="done")
             )
         assert isinstance(result, IssueInfo)
 
@@ -622,8 +620,10 @@ class TestDeriveItemId:
 
 
 class TestExtractRepo:
-    def _info(self, labels: list[str] = [], body: str = "") -> IssueInfo:
-        return IssueInfo(project_id="PROJ", issue_id="PROJ-1", title="t", labels=labels, body=body)
+    def _info(self, labels: list[str] | None = None, body: str = "") -> IssueInfo:
+        return IssueInfo(
+            project_id="PROJ", issue_id="PROJ-1", title="t", labels=labels or [], body=body
+        )
 
     def test_repo_label_wins(self):
         info = self._info(labels=["repo:owner/myrepo", "bug"])
@@ -651,12 +651,10 @@ class TestExtractRepo:
 
 class TestJiraTicketIntakeService:
     def _make_intake(self) -> tuple[JiraTicketIntakeService, MagicMock]:
-        from unittest.mock import MagicMock
+        import tempfile
 
         from autodev.core.backlog_service import BacklogService
         from autodev.core.state_store import FileStateStore
-
-        import tempfile
 
         store = FileStateStore(tempfile.mkdtemp())
         backlog_svc = BacklogService(store)
@@ -685,9 +683,7 @@ class TestJiraTicketIntakeService:
 
     def test_intake_is_idempotent(self):
         intake, adapter = self._make_intake()
-        info = IssueInfo(
-            project_id="PROJ", issue_id="PROJ-1", title="T", body="", status="open"
-        )
+        info = IssueInfo(project_id="PROJ", issue_id="PROJ-1", title="T", body="", status="open")
         with patch.object(adapter, "fetch_issue", return_value=info) as mock_fetch:
             intake.intake("PROJ-1")
             # Second call should not hit the API
@@ -698,9 +694,7 @@ class TestJiraTicketIntakeService:
 
     def test_intake_normalizes_priority(self):
         intake, adapter = self._make_intake()
-        info = IssueInfo(
-            project_id="PROJ", issue_id="PROJ-2", title="T", priority="critical"
-        )
+        info = IssueInfo(project_id="PROJ", issue_id="PROJ-2", title="T", priority="critical")
         with patch.object(adapter, "fetch_issue", return_value=info):
             item = intake.intake("PROJ-2")
 

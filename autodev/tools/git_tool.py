@@ -2,16 +2,75 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import re
+import stat
 import subprocess
-from typing import Any
-from urllib.parse import urlparse
+import sys
+import tempfile
+from typing import Any, Generator, Optional
+from urllib.parse import urlparse, urlunparse
 
 from autodev.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 GIT_URL_CREDENTIALS_PATTERN = re.compile(r"(?P<scheme>https?://)(?P<userinfo>[^/\s@]+)@")
+
+
+@contextlib.contextmanager
+def _git_credential_env(url: str) -> Generator[tuple[str, dict[str, str]], None, None]:
+    """Strip embedded credentials from a git URL and expose them via GIT_ASKPASS.
+
+    Yields ``(clean_url, extra_env)``.  If the URL carries no credentials,
+    yields ``(url, {})`` without creating any temp files.
+
+    The GIT_ASKPASS helper is a tiny Python script that reads the token from
+    ``_AUTODEV_GIT_TOKEN`` in the subprocess environment rather than
+    hardcoding it in the script body or in a subprocess argument — preventing
+    the token from being visible in ``/proc/<pid>/cmdline`` or ``ps`` output.
+    """
+    parsed = urlparse(url)
+    token = parsed.password or parsed.username or ""
+    if not token:
+        yield url, {}
+        return
+
+    # Reconstruct URL without credentials in the netloc
+    netloc = parsed.hostname or ""
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    clean_url = urlunparse(parsed._replace(netloc=netloc))
+
+    helper = (
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "prompt = sys.argv[1] if len(sys.argv) > 1 else ''\n"
+        "if 'Username' in prompt:\n"
+        "    print(os.environ.get('_AUTODEV_GIT_USER', 'x-token'))\n"
+        "else:\n"
+        "    print(os.environ.get('_AUTODEV_GIT_TOKEN', ''))\n"
+    )
+    fd, helper_path = tempfile.mkstemp(suffix=".py")
+    try:
+        os.write(fd, helper.encode())
+        os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        os.close(fd)
+        yield (
+            clean_url,
+            {
+                "GIT_ASKPASS": helper_path,
+                "GIT_TERMINAL_PROMPT": "0",
+                "_AUTODEV_GIT_TOKEN": token,
+                "_AUTODEV_GIT_USER": parsed.username or "x-token",
+            },
+        )
+    finally:
+        try:
+            os.unlink(helper_path)
+        except OSError:
+            pass
 
 
 def sanitize_git_output(text: str) -> str:
@@ -60,21 +119,30 @@ class GitTool(Tool):
     # ------------------------------------------------------------------
 
     def clone(self, repo_url: str, dest_path: str) -> str:
-        """Clone *repo_url* into *dest_path* and return the destination."""
-        logger.info("Cloning %s → %s", self._sanitize_repo_url(repo_url), dest_path)
-        try:
-            import git  # GitPython
-        except ModuleNotFoundError:
-            self._run_git_command(["clone", repo_url, dest_path])
-            return dest_path
+        """Clone *repo_url* into *dest_path* and return the destination.
 
-        try:
-            git.Repo.clone_from(repo_url, dest_path)
-        except Exception as exc:
-            sanitized_error = sanitize_git_output(str(exc))
-            if sanitized_error != str(exc):
-                raise RuntimeError(sanitized_error) from exc
-            raise
+        If the URL contains embedded credentials (``https://token@host/...``),
+        they are extracted and supplied via a temporary GIT_ASKPASS helper so
+        the token never appears in subprocess argument lists or ``/proc`` cmdline
+        entries.  The helper file is deleted unconditionally when the clone
+        completes or fails.
+        """
+        logger.info("Cloning %s → %s", self._sanitize_repo_url(repo_url), dest_path)
+        with _git_credential_env(repo_url) as (url, cred_env):
+            merged_env: Optional[dict[str, str]] = {**os.environ, **cred_env} if cred_env else None
+            try:
+                import git  # GitPython
+            except ModuleNotFoundError:
+                self._run_git_command(["clone", url, dest_path], env=merged_env)
+                return dest_path
+
+            try:
+                git.Repo.clone_from(url, dest_path, env=merged_env)
+            except Exception as exc:
+                # Always wrap in RuntimeError with a sanitized message so that
+                # any credential material in the exception is redacted,
+                # regardless of whether the sanitizer regex matched.
+                raise RuntimeError(sanitize_git_output(str(exc))) from exc
         return dest_path
 
     def create_branch(self, repo_path: str, branch_name: str) -> None:
@@ -180,7 +248,7 @@ class GitTool(Tool):
             return repo_url.rsplit(":", maxsplit=1)[0].rsplit("@", maxsplit=1)[-1]
         return repo_url
 
-    def run_git(self, args: list[str]) -> str:
+    def run_git(self, args: list[str], *, env: Optional[dict[str, str]] = None) -> str:
         """Run a raw git command and return stdout; raises RuntimeError with sanitized output."""
         try:
             completed = subprocess.run(
@@ -188,6 +256,7 @@ class GitTool(Tool):
                 check=False,
                 capture_output=True,
                 text=True,
+                env=env,
             )
         except FileNotFoundError as exc:
             raise RuntimeError("git executable is not available") from exc
@@ -198,5 +267,5 @@ class GitTool(Tool):
             raise RuntimeError(error)
         return completed.stdout
 
-    def _run_git_command(self, args: list[str]) -> None:
-        self.run_git(args)
+    def _run_git_command(self, args: list[str], env: Optional[dict[str, str]] = None) -> None:
+        self.run_git(args, env=env)
