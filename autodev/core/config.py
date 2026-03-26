@@ -83,8 +83,7 @@ class RetryConfig(BaseModel):
         default=2.0,
         gt=0,
         description=(
-            "Exponential backoff base in seconds. "
-            "Delay before attempt N = backoff_base × 2^(N-1)."
+            "Exponential backoff base in seconds. Delay before attempt N = backoff_base × 2^(N-1)."
         ),
     )
 
@@ -152,9 +151,7 @@ class PipelineConfig(BaseModel):
         return cls.from_yaml_str(text, source=str(path))
 
     @classmethod
-    def from_yaml_str(
-        cls, text: str, *, source: str = "<string>"
-    ) -> "PipelineConfig":
+    def from_yaml_str(cls, text: str, *, source: str = "<string>") -> "PipelineConfig":
         """Parse and validate a PipelineConfig from a YAML string.
 
         Raises:
@@ -169,16 +166,13 @@ class PipelineConfig(BaseModel):
             raise ConfigError(f"Invalid YAML in {source}: {exc}") from exc
 
         if not isinstance(data, dict):
-            raise ConfigError(
-                f"Config {source} must be a YAML mapping; got {type(data).__name__}"
-            )
+            raise ConfigError(f"Config {source} must be a YAML mapping; got {type(data).__name__}")
 
         try:
             return cls.model_validate(data)
         except ValidationError as exc:
             errors = "; ".join(
-                f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-                for e in exc.errors()
+                f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors()
             )
             raise ConfigError(f"Invalid pipeline config in {source}: {errors}") from exc
 

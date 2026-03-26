@@ -21,7 +21,6 @@ from autodev.core.schemas import (
     PhaseName,
     ReviewDecision,
     RunStatus,
-    TaskStatus,
     ValidationCommandResult,
     ValidationResult,
     ValidationStatus,
@@ -199,9 +198,7 @@ class TestRunPipelineE2E:
         # Stub only external boundaries
         monkeypatch.setattr("autodev.agents.planner.PlannerAgent.run", _stub_plan)
         monkeypatch.setattr("autodev.agents.coder.CoderAgent.run", _stub_implement)
-        monkeypatch.setattr(
-            "autodev.tools.test_runner.TestRunner.run_validation", _stub_validate
-        )
+        monkeypatch.setattr("autodev.tools.test_runner.TestRunner.run_validation", _stub_validate)
         monkeypatch.setattr("autodev.agents.reviewer.ReviewerAgent.run", _stub_review_approved)
         # Stub issue intake so we don't need a real GitHub token
         monkeypatch.setattr(orch, "_read_issue", lambda ctx: ctx)
@@ -304,10 +301,9 @@ class TestRunCIPipelineE2E:
         orch = _make_orch(tmp_path)
         monkeypatch.setattr("autodev.agents.planner.PlannerAgent.run", _stub_plan)
         monkeypatch.setattr("autodev.agents.coder.CoderAgent.run", _stub_implement)
-        monkeypatch.setattr(
-            "autodev.tools.test_runner.TestRunner.run_validation", _stub_validate
-        )
+        monkeypatch.setattr("autodev.tools.test_runner.TestRunner.run_validation", _stub_validate)
         monkeypatch.setattr("autodev.agents.reviewer.ReviewerAgent.run", _stub_review_approved)
+
         # Stub CI intake: inject metadata without hitting GitHub
         def _fake_read_ci_run(ctx: AgentContext) -> AgentContext:
             meta = dict(ctx.metadata)
@@ -371,7 +367,7 @@ class TestRunCIPipelineE2E:
 class TestResumePipeline:
     def _seed_run(self, tmp_path: Path, issue_url: str = _ISSUE_URL) -> tuple[str, str]:
         """Create a minimal persisted run and return (work_dir, run_id)."""
-        from autodev.core.schemas import IsolationMode, RunMetadata
+        from autodev.core.schemas import RunMetadata
 
         state_path = str(tmp_path / "state")
         store = FileStateStore(state_path)
@@ -389,9 +385,7 @@ class TestResumePipeline:
 
         monkeypatch.setattr("autodev.agents.planner.PlannerAgent.run", _stub_plan)
         monkeypatch.setattr("autodev.agents.coder.CoderAgent.run", _stub_implement)
-        monkeypatch.setattr(
-            "autodev.tools.test_runner.TestRunner.run_validation", _stub_validate
-        )
+        monkeypatch.setattr("autodev.tools.test_runner.TestRunner.run_validation", _stub_validate)
         monkeypatch.setattr("autodev.agents.reviewer.ReviewerAgent.run", _stub_review_approved)
         monkeypatch.setattr(orch, "_read_issue", lambda ctx: ctx)
 
@@ -428,9 +422,7 @@ class TestStageOutputContract:
         orch = _make_orch(tmp_path)
         monkeypatch.setattr("autodev.agents.planner.PlannerAgent.run", _stub_plan)
         monkeypatch.setattr("autodev.agents.coder.CoderAgent.run", _stub_implement)
-        monkeypatch.setattr(
-            "autodev.tools.test_runner.TestRunner.run_validation", _stub_validate
-        )
+        monkeypatch.setattr("autodev.tools.test_runner.TestRunner.run_validation", _stub_validate)
         monkeypatch.setattr("autodev.agents.reviewer.ReviewerAgent.run", _stub_review_approved)
         monkeypatch.setattr(orch, "_read_issue", lambda ctx: ctx)
         orch.run_pipeline(_ISSUE_URL)
