@@ -305,8 +305,10 @@ The biggest gaps are:
 
 ### AD-021 Expand issue intake into backlog-item creation
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:github`
+- **Completion notes:** added [autodev/github/issue_intake.py](autodev/github/issue_intake.py) with `IssueIntakeService` that normalizes a GitHub issue into a durable `BacklogItem` — parsing checkbox acceptance criteria, mapping priority labels (`priority:p0`–`p3`), preserving labels and repo metadata, and making re-intake idempotent; updated [autodev/core/runtime.py](autodev/core/runtime.py) so `_read_issue()` persists via `IssueIntakeService` and threads `backlog_item_id` into context, covered by [tests/test_github.py](tests/test_github.py).
 - **Problem:** GitHub issues are currently read directly into transient runtime context.
 - **Scope:** Convert issue intake into backlog item creation with normalized title, description, labels, and acceptance criteria.
 - **Acceptance criteria:**
@@ -316,8 +318,10 @@ The biggest gaps are:
 
 ### AD-022 Add CLI commands for backlog and run management
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:cli`
+- **Completion notes:** added `backlog add` and `backlog list` sub-commands (title slug as item ID, priority/label/criterion flags, status filter) and `run start`, `run resume`, and `runs show` commands to [autodev/cli/main.py](autodev/cli/main.py), with `resume_pipeline(run_id)` added to [autodev/core/runtime.py](autodev/core/runtime.py) to load persisted run metadata and re-execute the pipeline; all commands share a stable default state dir (`~/.autodev/state`) and accept `--work-dir` for override; covered by [tests/test_cli.py](tests/test_cli.py).
 - **Problem:** The CLI exposes `init`, `run`, `fix-ci`, and `status`, but not the durable runtime concepts from the design.
 - **Scope:** Add commands such as `backlog add`, `backlog list`, `run start`, `run resume`, and `runs show`.
 - **Acceptance criteria:**
@@ -335,6 +339,8 @@ The biggest gaps are:
   - each run produces a summary artifact
   - failure history and validation history are discoverable from disk
   - artifact paths are stable enough for future UI work
+- **Status:** `completed`
+- **Completion notes:** Implemented `RunReporter` in `autodev/core/run_reporter.py`. Each run writes `runs/{run_id}/summary.json` and `runs/{run_id}/summary.md`. Validation results are appended to `reports/validation-history.json` after every run; failure stage outputs are appended to `reports/failure-history.json` on failed runs. `RunReporter` is wired into the `Orchestrator.run_pipeline()` finally block. 14 tests added in `tests/test_run_reporter.py`.
 
 ### AD-024 Implement `fix-ci` as a real intake and repair workflow
 
@@ -346,11 +352,14 @@ The biggest gaps are:
   - CI logs can be ingested into a backlog item
   - the resulting run follows the standard phase pipeline
   - artifacts clearly distinguish issue-driven and CI-driven runs
+- **Status:** `completed`
+- **Completion notes:** Implemented `CIRunReader` (`autodev/github/ci_runner.py`) and `CIIntakeService` (`autodev/github/ci_intake.py`) following the IssueReader/IssueIntakeService pattern exactly. GitHub Actions run URLs (`https://github.com/<owner>/<repo>/actions/runs/<run_id>`) are parsed, failing jobs/steps fetched via PyGithub, and validation commands inferred from step names. `BacklogItem.source = "github_actions"` distinguishes CI-driven runs. `Orchestrator.run_ci_pipeline()` added; `run_pipeline()` refactored to share a `_run_pipeline_impl(entry_url, intake_fn)` body. Fixed latent bug: `self.backlog_service` was never initialized in `Orchestrator.__init__`. CLI `fix-ci` stub replaced with real implementation. 40 tests added in `tests/test_ci_intake.py` (257 total).
 
 ## Milestone 8: Quality, Testing, and Documentation
 
 ### AD-025 Replace stub-oriented tests with durable runtime and end-to-end tests
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
 - **Problem:** Existing tests mostly validate scaffolding behavior and will not protect the durable runtime as it grows.
@@ -359,9 +368,11 @@ The biggest gaps are:
   - the new runtime subsystems have targeted unit coverage
   - at least one end-to-end local run is exercised in tests with mocks or fixtures
   - old tests are updated or retired when they no longer match the architecture
+- **Completion notes:** Added `tests/test_orchestrator_e2e.py` with 29 tests covering: `PhaseExecutionPayload` round-trip (4 tests), `PhaseRegistry` error handling (3 tests), full `run_pipeline()` E2E with real phase handlers (10 tests), `run_ci_pipeline()` E2E (5 tests), `resume_pipeline()` (3 tests), and stage output contract (4 tests). Stubs only patch the LLM/API boundary (`PlannerAgent.run`, `CoderAgent.run`, `TestRunner.run_validation`, `ReviewerAgent.run`); all state-store, phase-registry, and RunReporter logic runs for real. Total suite: 286 tests.
 
 ### AD-026 Add configuration support for pipelines, validation profiles, isolation mode, and retry policy
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p1`
 - **Type:** `type:core`
 - **Problem:** Current config is minimal and does not represent the runtime controls described in the design.
@@ -370,9 +381,11 @@ The biggest gaps are:
   - config files map cleanly to runtime models
   - invalid config fails early with clear errors
   - defaults are safe and documented
+- **Completion notes:** Created `autodev/core/config.py` with Pydantic models `PipelineConfig`, `ValidationConfig`, `RetryConfig`, and `ConfigError`. Config is loaded from `./autodev.yaml` or `~/.autodev/pipeline.yaml` (auto-discovery) or an explicit `--config` flag. Invalid YAML, unknown keys, and out-of-range values all raise `ConfigError` at startup with field-level error messages. `Orchestrator` now accepts a `pipeline_config` kwarg and seeds validation settings (`validation_breadth`, `validation_stop_on_first_failure`, `validation_commands`) into the context metadata before intake runs. CLI commands `run`, `fix-ci`, `run start`, `run resume` gained `--config` and `--isolation-mode` flags. `autodev status` shows the active config file and its key settings. Reference config documented at `configs/pipeline.yaml`. 43 new tests in `tests/test_config.py`.
 
 ### AD-027 Document local development, architecture, and contribution workflows
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p2`
 - **Type:** `type:docs`
 - **Problem:** The repo now has a good high-level design, but it still needs implementation-oriented contributor documentation.
@@ -381,6 +394,7 @@ The biggest gaps are:
   - contributors can bootstrap the project and run tests locally
   - the architecture docs reflect the actual implementation structure
   - issue authors have guidance for writing good backlog items
+- **Completion notes:** Created `CONTRIBUTING.md` covering bootstrap commands, running tests (full suite, single file, single test), testing strategy (unit vs E2E, stub boundaries), backlog workflow (branch naming, PR flow), and a template + checklist for writing good backlog items. Updated `README.md` to reflect current implementation reality (Python 3.9+, all phases complete, new project layout with config/failure_classifier/run_reporter/ci modules, CLI flags, state directory layout). Updated `docs/architecture_inventory.md` with current implementation status and revised the legacy-abstractions section to distinguish resolved vs open items.
 
 ## First Recommended Issue Slice
 

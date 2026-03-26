@@ -1,12 +1,16 @@
 # AutoDev Architecture Inventory
 
-This inventory maps the current scaffold under `autodev/` to the target runtime described in [README.md](../README.md) and [system_design.md](../system_design.md).
+This inventory maps `autodev/` packages to their target runtime subsystems. It was written early in the project (pre-AD-003) as a migration guide and is periodically updated as implementation progresses.
 
-Its purpose is to make follow-up refactors unambiguous: each major package has a target subsystem, a disposition, and a concrete migration note.
+**Implementation status as of AD-027 (2026-03-25):** Milestones 0–8 (AD-001 through AD-027) are complete. The runtime foundation — schemas, state store, phase registry, backlog service, task materializer, scheduler, workspace manager, failure classifier, CI intake, and pipeline config — is fully implemented. The primary remaining work is polishing the CLI, extending validation profiles, and hardening the agent implementations.
 
 ## Summary
 
-The current repository is a useful scaffold, but most of the durable runtime described in the design does not exist yet.
+- **Complete:** durable schemas, file-backed state store, backlog/task/run lifecycle, phase registry, workspace isolation (snapshot/branch/worktree), failure classification, RunReporter, CI intake, PipelineConfig loading.
+- **Partial:** agent implementations (planner/coder/reviewer stub LLM calls; debugger is a repair helper only).
+- **Future:** approval gates, multi-repo support, additional validation profiles, agent tool-calling improvements.
+
+Original disposition summary (pre-implementation):
 
 - **Keep:** model routing, basic safety guardrails, and the CLI shell as starting points.
 - **Refactor:** agents, GitHub helpers, shell/filesystem/git tools, and the unified orchestrator entrypoint.
@@ -75,27 +79,26 @@ The current repository is a useful scaffold, but most of the durable runtime des
 
 These are the main places where the scaffold still carries extra or legacy structure.
 
-1. **Clone logic exists in two layers.**
+1. **Clone logic exists in two layers.** *(still open)*
    - `github/repo_cloner.py` wraps `tools/git_tool.py` for cloning.
    - The durable runtime should keep one workspace-owned cloning path.
 
-2. **Compatibility orchestrator shims still exist.**
-   - `core/orchestrator.py` is only a re-export.
-   - `RuntimeOrchestrator` remains an alias in `core/runtime.py`.
-   - These should be removed after migration to the durable runtime API.
+2. **Compatibility orchestrator shim.** *(still open)*
+   - `core/orchestrator.py` is only a re-export of `core/runtime.Orchestrator`.
+   - Remove it after all callers use `autodev.core.runtime.Orchestrator` directly.
 
-3. **Agent names reflect the scaffold, not the target phase model.**
-   - `CoderAgent` should become an implementer.
-   - `DebuggerAgent` should not remain a first-class runtime phase in the MVP design.
+3. **Agent names reflect the scaffold, not the target phase model.** *(still open)*
+   - `CoderAgent` should become an `ImplementerAgent` once the agent contract is finalized.
+   - `DebuggerAgent` is a repair helper; it should not be a first-class runtime phase.
 
-4. **Validation is split between runtime logic and a stub tool.**
-   - `core/runtime.py` decides validation flow.
-   - `tools/test_runner.py` only runs one command.
-   - This should be replaced by a dedicated validation engine subsystem.
+4. **Validation command resolution is split.** *(partially resolved)*
+   - `PhaseRegistry` now resolves validation policy from task metadata and `PipelineConfig`.
+   - `TestRunner` still runs one command at a time. Broader multi-command profiles are future work.
 
-5. **State is transient throughout the pipeline.**
-   - `AgentContext` mixes issue metadata, plan data, file changes, and validation output in one in-memory object.
-   - This must be replaced by durable schemas and a file-backed state store.
+5. **`AgentContext` is the legacy transient context.** *(partially resolved)*
+   - `PhaseExecutionPayload` / `PhaseExecutionResult` are the formal phase contracts.
+   - `AgentContext` is still used inside agent implementations and will be retired incrementally.
+   - Do not add new fields to `AgentContext`; use payload metadata instead.
 
 ## Recommended Refactor Targets
 

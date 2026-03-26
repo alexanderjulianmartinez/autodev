@@ -1,0 +1,39 @@
+# AutoDev pipeline configuration
+#
+# This file documents all available settings with their safe defaults.
+# Copy it to ./autodev.yaml (project-level) or ~/.autodev/pipeline.yaml
+# (user-level) and customise as needed.  AutoDev loads the first file it
+# finds in that order.  Unknown keys are rejected at startup.
+
+# Workspace isolation strategy for each run.
+# Options: snapshot | branch | worktree
+isolation_mode: snapshot
+
+# Maximum debug/repair iterations allowed per run before giving up.
+max_iterations: 3
+
+# When true, skip PR creation and all other external side-effects.
+dry_run: false
+
+validation:
+  # How broadly to run validation after each implementation attempt.
+  # Options:
+  #   targeted        — run tests only for files changed in this run (default)
+  #   broader-fallback — expand to the full test suite if targeted tests fail
+  breadth: targeted
+
+  # Stop running validation commands after the first failure.
+  stop_on_first_failure: true
+
+  # Explicit validation commands.  Leave empty to auto-detect from the repo
+  # structure (pytest, npm test, cargo test, etc.).
+  commands: []
+
+retry:
+  # Maximum number of retries for a retryable phase failure.
+  # 0 = no retries (fail immediately).
+  max_retries: 0
+
+  # Exponential backoff base in seconds.
+  # Wait before attempt N = backoff_base × 2^(N-1).
+  backoff_base: 2.0
