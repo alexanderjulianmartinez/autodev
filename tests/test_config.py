@@ -5,16 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from autodev.core.config import (
     ConfigError,
     PipelineConfig,
     RetryConfig,
     ValidationConfig,
-    _CONFIG_SEARCH_PATHS,
 )
 from autodev.core.schemas import IsolationMode
-
 
 # ---------------------------------------------------------------------------
 # ValidationConfig
@@ -41,7 +40,7 @@ class TestValidationConfig:
         assert cfg.commands == ["pytest -q", "ruff check ."]
 
     def test_extra_key_forbidden(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ValidationConfig(**{"breadth": "targeted", "unknown_key": True})
 
 
@@ -60,15 +59,15 @@ class TestRetryConfig:
         assert RetryConfig(max_retries=3).max_retries == 3
 
     def test_negative_max_retries_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             RetryConfig(max_retries=-1)
 
     def test_zero_backoff_base_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             RetryConfig(backoff_base=0)
 
     def test_extra_key_forbidden(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             RetryConfig(**{"max_retries": 0, "jitter": True})
 
 
@@ -87,11 +86,11 @@ class TestPipelineConfigDefaults:
         assert isinstance(cfg.retry, RetryConfig)
 
     def test_max_iterations_ge_1(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             PipelineConfig(max_iterations=0)
 
     def test_extra_key_forbidden(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             PipelineConfig(**{"isolation_mode": "snapshot", "unknown": "x"})
 
 
@@ -259,9 +258,7 @@ class TestAsContextMetadata:
         assert cfg.as_context_metadata()["validation_breadth"] == "broader-fallback"
 
     def test_stop_on_first_failure_false(self):
-        cfg = PipelineConfig.from_yaml_str(
-            "validation:\n  stop_on_first_failure: false\n"
-        )
+        cfg = PipelineConfig.from_yaml_str("validation:\n  stop_on_first_failure: false\n")
         assert cfg.as_context_metadata()["validation_stop_on_first_failure"] is False
 
 
@@ -311,9 +308,7 @@ class TestOrchestratorPipelineConfigIntegration:
             return ctx.model_copy(update={"plan": ["step 1"]})
 
         def _stub_implement(self: Any, task: str, ctx: AgentContext) -> AgentContext:
-            return ctx.model_copy(
-                update={"files_modified": [], "metadata": {**ctx.metadata}}
-            )
+            return ctx.model_copy(update={"files_modified": [], "metadata": {**ctx.metadata}})
 
         def _stub_validate(
             self: Any,
@@ -351,9 +346,7 @@ class TestOrchestratorPipelineConfigIntegration:
 
         monkeypatch.setattr("autodev.agents.planner.PlannerAgent.run", _stub_plan)
         monkeypatch.setattr("autodev.agents.coder.CoderAgent.run", _stub_implement)
-        monkeypatch.setattr(
-            "autodev.tools.test_runner.TestRunner.run_validation", _stub_validate
-        )
+        monkeypatch.setattr("autodev.tools.test_runner.TestRunner.run_validation", _stub_validate)
         monkeypatch.setattr("autodev.agents.reviewer.ReviewerAgent.run", _stub_review)
         monkeypatch.setattr(orch, "_read_issue", lambda ctx: ctx)
 

@@ -385,6 +385,7 @@ The biggest gaps are:
 
 ### AD-027 Document local development, architecture, and contribution workflows
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p2`
 - **Type:** `type:docs`
 - **Problem:** The repo now has a good high-level design, but it still needs implementation-oriented contributor documentation.
@@ -393,6 +394,7 @@ The biggest gaps are:
   - contributors can bootstrap the project and run tests locally
   - the architecture docs reflect the actual implementation structure
   - issue authors have guidance for writing good backlog items
+- **Completion notes:** Created `CONTRIBUTING.md` covering bootstrap commands, running tests (full suite, single file, single test), testing strategy (unit vs E2E, stub boundaries), backlog workflow (branch naming, PR flow), and a template + checklist for writing good backlog items. Updated `README.md` to reflect current implementation reality (Python 3.9+, all phases complete, new project layout with config/failure_classifier/run_reporter/ci modules, CLI flags, state directory layout). Updated `docs/architecture_inventory.md` with current implementation status and revised the legacy-abstractions section to distinguish resolved vs open items.
 
 ## First Recommended Issue Slice
 
