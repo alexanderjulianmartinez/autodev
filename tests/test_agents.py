@@ -82,6 +82,67 @@ class TestPlannerAgent:
         assert any("pytest" in hint.lower() for hint in result.metadata["validation_hints"])
         assert any("auth.py" in step for step in result.plan)
 
+    def test_run_prefers_explicit_target_files_and_requested_changes(self, tmp_path):
+        agent = PlannerAgent()
+        (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+        ctx = AgentContext(
+            issue_url="https://github.com/a/demo/issues/4",
+            repo_path=str(tmp_path),
+            metadata={
+                "issue_title": "Document dry run mode",
+                "issue_body": (
+                    "## Target Files\n"
+                    "- README.md\n\n"
+                    "## Requested Changes\n"
+                    "- Explain that dry-run skips remote promotion.\n"
+                    "- Mention that run artifacts are written to the state directory.\n\n"
+                    "## Acceptance Criteria\n"
+                    "- README.md mentions dry-run skips remote promotion.\n"
+                ),
+            },
+        )
+
+        result = agent.run("generate plan", ctx)
+
+        assert result.metadata["likely_target_files"] == ["README.md"]
+        assert result.metadata["requested_changes"] == [
+            "Explain that dry-run skips remote promotion.",
+            "Mention that run artifacts are written to the state directory.",
+        ]
+        assert result.metadata["execution_strategy"] == "text_update"
+        assert any("requested documentation" in step.lower() for step in result.plan)
+
+    def test_run_extracts_code_scaffold_strategy_and_validation_commands(self, tmp_path):
+        agent = PlannerAgent()
+        (tmp_path / "contracts.py").write_text("", encoding="utf-8")
+
+        ctx = AgentContext(
+            issue_url="https://github.com/a/demo/issues/5",
+            repo_path=str(tmp_path),
+            metadata={
+                "issue_title": "Scaffold integration contracts",
+                "issue_body": (
+                    "## Target Files\n"
+                    "- contracts.py\n\n"
+                    "## Requested Changes\n"
+                    "- add protocol IntegrationProvider with fetch and update methods\n"
+                    "- add dataclass CapabilityDescriptor\n"
+                    "- add function build_provider\n\n"
+                    "## Validation Commands\n"
+                    "- pytest tests/test_contracts.py -q\n\n"
+                    "## Acceptance Criteria\n"
+                    "- contracts.py defines IntegrationProvider\n"
+                ),
+            },
+        )
+
+        result = agent.run("generate plan", ctx)
+
+        assert result.metadata["execution_strategy"] == "code_scaffold"
+        assert result.metadata["validation_commands"] == ["pytest tests/test_contracts.py -q"]
+        assert any("scaffold the requested code constructs" in step.lower() for step in result.plan)
+
     def test_score_candidate_file_skips_oversized_content_reads(self, tmp_path):
         agent = PlannerAgent()
         candidate = tmp_path / "notes.txt"
@@ -199,6 +260,122 @@ class TestCoderAgent:
         assert result.files_modified == []
         assert first.read_text(encoding="utf-8") == "print('first')\n"
         assert second.read_text(encoding="utf-8") == "print('second')\n"
+
+    def test_run_scaffolds_python_symbols_for_explicit_code_issue(self, tmp_path):
+        store = FileStateStore(str(tmp_path / "state"))
+        manager = WorkspaceManager(store)
+        supervisor = Supervisor(state_store=store)
+        run = manager.create_run("AD-028", run_id="run-028-code")
+        workspace = tmp_path / "state" / "runs" / "run-028-code" / "workspace"
+
+        agent = CoderAgent(workspace_manager=manager, supervisor=supervisor)
+        ctx = AgentContext(
+            repo_path=str(workspace),
+            plan=["1. Scaffold integration contracts in contracts.py"],
+            metadata={
+                "run_id": run.run_id,
+                "issue_title": "Scaffold integration contracts",
+                "likely_target_files": ["contracts.py"],
+                "requested_changes": [
+                    "add protocol IntegrationProvider with fetch and update methods",
+                    "add dataclass CapabilityDescriptor",
+                    "add function build_provider",
+                ],
+            },
+        )
+
+        result = agent.run("implement plan", ctx)
+        content = (workspace / "contracts.py").read_text(encoding="utf-8")
+
+        assert result.metadata["implementation_status"] == "applied"
+        assert result.files_modified == ["contracts.py"]
+        assert "from typing import Protocol" in content
+        assert "from dataclasses import dataclass" in content
+        assert "class IntegrationProvider(Protocol):" in content
+        assert "def fetch(self, identifier: str) -> object: ..." in content
+        assert "@dataclass" in content
+        assert "class CapabilityDescriptor:" in content
+        assert "def build_provider() -> None:" in content
+
+    def test_llm_code_gen_writes_model_output(self, tmp_path):
+        """When model_router is present, _apply_single_edit uses LLM output."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        target = workspace / "utils.py"
+        target.write_text("# placeholder\n", encoding="utf-8")
+
+        class StubRouter:
+            def generate(self, _prompt, model_key=None):
+                return "def helper() -> None:\n    pass\n"
+
+        agent = CoderAgent(model_router=StubRouter())
+        ctx = AgentContext(
+            repo_path=str(workspace),
+            plan=["1. Implement helper in utils.py"],
+            metadata={
+                "issue_title": "Add helper function",
+                "likely_target_files": ["utils.py"],
+            },
+        )
+
+        result = agent.run("implement plan", ctx)
+
+        assert result.metadata["implementation_status"] == "applied"
+        assert target.read_text(encoding="utf-8") == "def helper() -> None:\n    pass\n"
+
+    def test_llm_code_gen_falls_back_to_annotation_on_exception(self, tmp_path):
+        """When the model raises, _apply_single_edit falls back to annotation."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        target = workspace / "utils.py"
+        target.write_text("# placeholder\n", encoding="utf-8")
+
+        class FailingRouter:
+            def generate(self, _prompt, model_key=None):
+                raise RuntimeError("API unavailable")
+
+        agent = CoderAgent(model_router=FailingRouter())
+        ctx = AgentContext(
+            repo_path=str(workspace),
+            plan=["1. Implement helper in utils.py"],
+            metadata={
+                "issue_title": "Add helper function",
+                "likely_target_files": ["utils.py"],
+            },
+        )
+
+        result = agent.run("implement plan", ctx)
+
+        assert result.metadata["implementation_status"] == "applied"
+        content = target.read_text(encoding="utf-8")
+        assert "AutoDev implementation note" in content
+
+    def test_llm_code_gen_falls_back_to_annotation_on_empty_response(self, tmp_path):
+        """When the model returns empty/whitespace, annotation fallback is used."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        target = workspace / "utils.py"
+        target.write_text("# placeholder\n", encoding="utf-8")
+
+        class EmptyRouter:
+            def generate(self, _prompt, model_key=None):
+                return "   "
+
+        agent = CoderAgent(model_router=EmptyRouter())
+        ctx = AgentContext(
+            repo_path=str(workspace),
+            plan=["1. Implement helper in utils.py"],
+            metadata={
+                "issue_title": "Add helper function",
+                "likely_target_files": ["utils.py"],
+            },
+        )
+
+        result = agent.run("implement plan", ctx)
+
+        assert result.metadata["implementation_status"] == "applied"
+        content = target.read_text(encoding="utf-8")
+        assert "AutoDev implementation note" in content
 
 
 class TestReviewerAgent:

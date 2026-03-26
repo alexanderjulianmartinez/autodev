@@ -1,6 +1,7 @@
 """Tests for tool components."""
 
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -236,6 +237,34 @@ class TestTestRunner:
         assert result.status == ValidationStatus.PASSED
         assert result.profiles == ["explicit"]
         assert result.commands[0].command == "pytest test_sample.py -q"
+
+    def test_run_validation_executes_pytest_with_active_interpreter(self, monkeypatch, tmp_path):
+        runner = TestRunner()
+        captured: dict[str, object] = {}
+
+        class Completed:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            captured["kwargs"] = kwargs
+            return Completed()
+
+        monkeypatch.setattr("autodev.tools.test_runner.subprocess.run", fake_run)
+
+        result = runner.run_validation(
+            repo_path=str(tmp_path),
+            task_id="validate-explicit",
+            explicit_commands=["pytest test_sample.py -q"],
+        )
+
+        assert result.status == ValidationStatus.PASSED
+        assert result.commands[0].command == "pytest test_sample.py -q"
+        assert captured["command"] == shlex.join(
+            [sys.executable, "-m", "pytest", "test_sample.py", "-q"]
+        )
 
     def test_run_validation_derives_targeted_pytest_from_changed_files(self, tmp_path):
         runner = TestRunner()
