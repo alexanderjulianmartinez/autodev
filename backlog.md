@@ -359,6 +359,7 @@ The biggest gaps are:
 
 ### AD-025 Replace stub-oriented tests with durable runtime and end-to-end tests
 
+- **Status:** completed on 2026-03-25
 - **Priority:** `priority:p0`
 - **Type:** `type:core`
 - **Problem:** Existing tests mostly validate scaffolding behavior and will not protect the durable runtime as it grows.
@@ -367,6 +368,7 @@ The biggest gaps are:
   - the new runtime subsystems have targeted unit coverage
   - at least one end-to-end local run is exercised in tests with mocks or fixtures
   - old tests are updated or retired when they no longer match the architecture
+- **Completion notes:** Added `tests/test_orchestrator_e2e.py` with 29 tests covering: `PhaseExecutionPayload` round-trip (4 tests), `PhaseRegistry` error handling (3 tests), full `run_pipeline()` E2E with real phase handlers (10 tests), `run_ci_pipeline()` E2E (5 tests), `resume_pipeline()` (3 tests), and stage output contract (4 tests). Stubs only patch the LLM/API boundary (`PlannerAgent.run`, `CoderAgent.run`, `TestRunner.run_validation`, `ReviewerAgent.run`); all state-store, phase-registry, and RunReporter logic runs for real. Total suite: 286 tests.
 
 ### AD-026 Add configuration support for pipelines, validation profiles, isolation mode, and retry policy
 

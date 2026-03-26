@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
-
-import pytest
 
 from autodev.core.run_reporter import (
     FAILURE_HISTORY_REPORT,
@@ -14,9 +11,6 @@ from autodev.core.run_reporter import (
     RunReporter,
 )
 from autodev.core.schemas import (
-    IsolationMode,
-    ReviewDecision,
-    ReviewResult,
     RunMetadata,
     RunStatus,
     ValidationCommandResult,
@@ -24,7 +18,6 @@ from autodev.core.schemas import (
     ValidationStatus,
 )
 from autodev.core.state_store import FileStateStore
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

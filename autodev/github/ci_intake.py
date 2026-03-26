@@ -120,9 +120,7 @@ class CIIntakeService:
             ) from exc
 
     def _create_item(self, item_id: str, run: CIRunData) -> BacklogItem:
-        title = (
-            f"CI Fix: {run.workflow_name} failed on run #{run.run_number} ({run.branch})"
-        )
+        title = f"CI Fix: {run.workflow_name} failed on run #{run.run_number} ({run.branch})"
         item = self.backlog_service.create_item(
             item_id=item_id,
             title=title,

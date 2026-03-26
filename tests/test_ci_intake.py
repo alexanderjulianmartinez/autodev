@@ -10,7 +10,6 @@ from autodev.core.state_store import FileStateStore
 from autodev.github.ci_intake import (
     CIIntakeService,
     _build_acceptance_criteria,
-    _build_description,
     _derive_item_id,
     _map_priority,
 )

@@ -152,9 +152,7 @@ class RunReporter:
             "commands": commands,
         }
 
-    def _review_summary(
-        self, review_results, context_metadata: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _review_summary(self, review_results, context_metadata: dict[str, Any]) -> dict[str, Any]:
         decision = str(context_metadata.get("review_decision", "")).strip()
         review_text = str(
             context_metadata.get("review_summary", context_metadata.get("review", ""))
@@ -250,7 +248,13 @@ class RunReporter:
         for stage, output in s.get("stages", {}).items():
             if isinstance(output, dict):
                 stage_status = output.get("status", "unknown")
-                icon = "✅" if stage_status == "completed" else "⏭" if stage_status == "skipped" else "❌"
+                icon = (
+                    "✅"
+                    if stage_status == "completed"
+                    else "⏭"
+                    if stage_status == "skipped"
+                    else "❌"
+                )
                 lines.append(f"- **{stage}**: {icon} {stage_status}")
                 if output.get("failure_class"):
                     lines.append(f"  - failure class: `{output['failure_class']}`")
@@ -382,6 +386,4 @@ class RunReporter:
             try:
                 self.state_store.append_report_entry(FAILURE_HISTORY_REPORT, entry)
             except Exception:
-                logger.warning(
-                    "RunReporter: failed to append failure history for run %r", run_id
-                )
+                logger.warning("RunReporter: failed to append failure history for run %r", run_id)
