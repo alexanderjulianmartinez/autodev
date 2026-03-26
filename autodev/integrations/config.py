@@ -59,9 +59,7 @@ class ProviderConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str = Field(
-        description="Provider identifier, e.g. 'github', 'linear', 'slack'."
-    )
+    provider: str = Field(description="Provider identifier, e.g. 'github', 'linear', 'slack'.")
     settings: dict[str, str] = Field(
         default_factory=dict,
         description="Provider-specific key/value settings (tokens, base URLs, etc.).",
@@ -108,9 +106,7 @@ class IntegrationsConfig(BaseModel):
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_yaml_str(
-        cls, text: str, *, source: str = "<string>"
-    ) -> "IntegrationsConfig":
+    def from_yaml_str(cls, text: str, *, source: str = "<string>") -> "IntegrationsConfig":
         """Parse and validate from a YAML string.
 
         The YAML may be:
@@ -131,8 +127,7 @@ class IntegrationsConfig(BaseModel):
 
         if not isinstance(data, dict):
             raise ConfigError(
-                f"Integration config {source} must be a YAML mapping; "
-                f"got {type(data).__name__}"
+                f"Integration config {source} must be a YAML mapping; got {type(data).__name__}"
             )
 
         # Unwrap an optional top-level ``integrations:`` key
@@ -143,12 +138,9 @@ class IntegrationsConfig(BaseModel):
             return cls.model_validate(data)
         except ValidationError as exc:
             errors = "; ".join(
-                f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-                for e in exc.errors()
+                f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors()
             )
-            raise ConfigError(
-                f"Invalid integration config in {source}: {errors}"
-            ) from exc
+            raise ConfigError(f"Invalid integration config in {source}: {errors}") from exc
 
     @classmethod
     def load(cls, path: str | Path) -> "IntegrationsConfig":
@@ -161,15 +153,11 @@ class IntegrationsConfig(BaseModel):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise ConfigError(
-                f"Cannot read integration config {path}: {exc}"
-            ) from exc
+            raise ConfigError(f"Cannot read integration config {path}: {exc}") from exc
         return cls.from_yaml_str(text, source=str(path))
 
     @classmethod
-    def discover(
-        cls, *, search_paths: Optional[list[Path]] = None
-    ) -> "IntegrationsConfig":
+    def discover(cls, *, search_paths: Optional[list[Path]] = None) -> "IntegrationsConfig":
         """Return the first config found in the standard search path, else all-disabled defaults.
 
         Search order (first existing file wins):

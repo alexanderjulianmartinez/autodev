@@ -18,7 +18,6 @@ from autodev.integrations import (
     ProviderInfo,
 )
 
-
 # ---------------------------------------------------------------------------
 # Stub providers used across tests
 # ---------------------------------------------------------------------------
@@ -177,9 +176,7 @@ class TestIntegrationsConfigFromYaml:
 
     def test_source_appears_in_error_message(self):
         with pytest.raises(ConfigError, match="myfile.yaml"):
-            IntegrationsConfig.from_yaml_str(
-                "unknown_type:\n  provider: x\n", source="myfile.yaml"
-            )
+            IntegrationsConfig.from_yaml_str("unknown_type:\n  provider: x\n", source="myfile.yaml")
 
     def test_missing_provider_key_raises_config_error(self):
         with pytest.raises(ConfigError, match="Invalid integration config"):
@@ -281,9 +278,7 @@ class TestRegistryFactoryRegistration:
 class TestRegistryLoad:
     def test_load_single_provider(self):
         registry = _make_registry()
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="stub-git", settings={"token": "t"})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="stub-git", settings={"token": "t"}))
         registry.load(cfg)
         assert registry.is_configured("git")
         assert not registry.is_configured("ci")
@@ -301,9 +296,7 @@ class TestRegistryLoad:
     def test_load_empty_config_clears_previous(self):
         registry = _make_registry()
         registry.load(
-            IntegrationsConfig(
-                git=ProviderConfig(provider="stub-git", settings={"token": "t"})
-            )
+            IntegrationsConfig(git=ProviderConfig(provider="stub-git", settings={"token": "t"}))
         )
         registry.load(IntegrationsConfig())  # reload with nothing
         assert not registry.is_configured("git")
@@ -337,43 +330,33 @@ class TestRegistryLoadFailures:
     def test_unknown_provider_raises_config_error(self):
         registry = IntegrationRegistry()
         # No factories registered
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="github", settings={"token": "t"})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="github", settings={"token": "t"}))
         with pytest.raises(ConfigError, match="unknown provider 'github'"):
             registry.load(cfg)
 
     def test_error_message_lists_registered_providers(self):
         registry = IntegrationRegistry()
         registry.register_factory("gitlab", _git_factory)
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="github", settings={"token": "t"})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="github", settings={"token": "t"}))
         with pytest.raises(ConfigError, match="gitlab"):
             registry.load(cfg)
 
     def test_missing_required_setting_raises_config_error(self):
         registry = _make_registry()
         # stub-git requires "token" — omit it
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="stub-git", settings={})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="stub-git", settings={}))
         with pytest.raises(ConfigError, match="missing required settings"):
             registry.load(cfg)
 
     def test_error_message_names_missing_keys(self):
         registry = _make_registry()
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="stub-git", settings={})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="stub-git", settings={}))
         with pytest.raises(ConfigError, match="token"):
             registry.load(cfg)
 
     def test_error_message_names_integration_type(self):
         registry = _make_registry()
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="stub-git", settings={})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="stub-git", settings={}))
         with pytest.raises(ConfigError, match="'git'"):
             registry.load(cfg)
 
@@ -384,9 +367,7 @@ class TestRegistryLoadFailures:
             raise RuntimeError("network unreachable")
 
         registry.register_factory("exploding-git", boom)
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="exploding-git", settings={})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="exploding-git", settings={}))
         with pytest.raises(ConfigError, match="failed to initialize"):
             registry.load(cfg)
 
@@ -398,9 +379,7 @@ class TestRegistryLoadFailures:
             raise ConfigError("bad token format")
 
         registry.register_factory("bad-git", raises_config_error)
-        cfg = IntegrationsConfig(
-            git=ProviderConfig(provider="bad-git", settings={})
-        )
+        cfg = IntegrationsConfig(git=ProviderConfig(provider="bad-git", settings={}))
         with pytest.raises(ConfigError, match="bad token format"):
             registry.load(cfg)
 
@@ -467,9 +446,7 @@ class TestRegistryIntrospection:
     def test_supports_configured_capability(self):
         registry = _make_registry()
         registry.load(
-            IntegrationsConfig(
-                git=ProviderConfig(provider="stub-git", settings={"token": "t"})
-            )
+            IntegrationsConfig(git=ProviderConfig(provider="stub-git", settings={"token": "t"}))
         )
         assert registry.supports(ProviderCapability.CREATE_PULL_REQUEST)
 
@@ -481,9 +458,7 @@ class TestRegistryIntrospection:
     def test_is_configured_true(self):
         registry = _make_registry()
         registry.load(
-            IntegrationsConfig(
-                git=ProviderConfig(provider="stub-git", settings={"token": "t"})
-            )
+            IntegrationsConfig(git=ProviderConfig(provider="stub-git", settings={"token": "t"}))
         )
         assert registry.is_configured("git")
 
@@ -535,9 +510,7 @@ class TestCapabilityBasedDispatch:
                 return ProviderInfo(provider_id="a", display_name="A")
 
             def capabilities(self) -> CapabilitySet:
-                return CapabilitySet(
-                    operations=frozenset({ProviderCapability.FETCH_REPOSITORY})
-                )
+                return CapabilitySet(operations=frozenset({ProviderCapability.FETCH_REPOSITORY}))
 
         class ProviderB:
             name = "B"
@@ -549,20 +522,14 @@ class TestCapabilityBasedDispatch:
                 return ProviderInfo(provider_id="b", display_name="B")
 
             def capabilities(self) -> CapabilitySet:
-                return CapabilitySet(
-                    operations=frozenset({ProviderCapability.FETCH_REPOSITORY})
-                )
+                return CapabilitySet(operations=frozenset({ProviderCapability.FETCH_REPOSITORY}))
 
         registry.register_factory("provider-a", ProviderA)
         registry.register_factory("provider-b", ProviderB)
 
-        registry.load(
-            IntegrationsConfig(git=ProviderConfig(provider="provider-a", settings={}))
-        )
+        registry.load(IntegrationsConfig(git=ProviderConfig(provider="provider-a", settings={})))
         assert registry.resolve(ProviderCapability.FETCH_REPOSITORY).name == "A"
 
         # Reload with provider-b — same runtime resolution code, different instance
-        registry.load(
-            IntegrationsConfig(git=ProviderConfig(provider="provider-b", settings={}))
-        )
+        registry.load(IntegrationsConfig(git=ProviderConfig(provider="provider-b", settings={})))
         assert registry.resolve(ProviderCapability.FETCH_REPOSITORY).name == "B"

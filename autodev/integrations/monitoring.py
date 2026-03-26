@@ -9,7 +9,6 @@ from pydantic import Field
 from autodev.core.schemas import AutoDevModel
 from autodev.integrations.base import CapabilitySet, ProviderInfo
 
-
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------

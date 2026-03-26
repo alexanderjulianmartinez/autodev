@@ -12,7 +12,6 @@ from autodev.integrations import (
     CIJobInfo,
     CIRunInfo,
     CIStepInfo,
-    CISystem,
     CloneRepositoryRequest,
     CloneResult,
     CreateBranchRequest,
@@ -21,7 +20,6 @@ from autodev.integrations import (
     DiffResult,
     DocumentInfo,
     DocumentSearchResult,
-    DocsProvider,
     FetchAlertsRequest,
     FetchDocumentRequest,
     FetchIssueRequest,
@@ -37,10 +35,8 @@ from autodev.integrations import (
     ListRunsRequest,
     MessageInfo,
     MessageResult,
-    MessagingSystem,
     MetricSeries,
     MetricsResult,
-    MonitoringSystem,
     ProviderCapability,
     ProviderInfo,
     PullRequestInfo,
@@ -52,7 +48,6 @@ from autodev.integrations import (
     UpdateDocumentRequest,
     UpdateIssueRequest,
 )
-
 
 # ---------------------------------------------------------------------------
 # CapabilitySet
@@ -148,9 +143,7 @@ class TestGitProviderModels:
         assert req.body == ""
 
     def test_get_diff_request(self):
-        req = GetDiffRequest(
-            repo_full_name="owner/repo", base_ref="main", head_ref="feature/x"
-        )
+        req = GetDiffRequest(repo_full_name="owner/repo", base_ref="main", head_ref="feature/x")
         assert req.path_filter == ""
 
     def test_clone_repository_request(self):
@@ -180,9 +173,7 @@ class TestGitProviderModels:
         assert pr.draft is False
 
     def test_diff_result_defaults(self):
-        diff = DiffResult(
-            repo_full_name="owner/repo", base_ref="main", head_ref="feature/x"
-        )
+        diff = DiffResult(repo_full_name="owner/repo", base_ref="main", head_ref="feature/x")
         assert diff.changed_files == []
         assert diff.additions == 0
         assert diff.deletions == 0
@@ -291,9 +282,7 @@ class TestCISystemModels:
             branch="main",
             status="completed",
             conclusion="failure",
-            jobs=[
-                CIJobInfo(job_id="j1", name="test", status="completed", conclusion="failure")
-            ],
+            jobs=[CIJobInfo(job_id="j1", name="test", status="completed", conclusion="failure")],
         )
         assert len(run.jobs) == 1
 
@@ -364,9 +353,7 @@ class TestMessagingSystemModels:
         assert msg.metadata == {}
 
     def test_message_result(self):
-        result = MessageResult(
-            message_id="m1", destination="#engineering", delivered=True
-        )
+        result = MessageResult(message_id="m1", destination="#engineering", delivered=True)
         assert result.delivered is True
 
 
@@ -428,13 +415,9 @@ class _StubGitProvider:
         return RepositoryInfo(repo_full_name=request.repo_full_name)
 
     def create_branch(self, request: CreateBranchRequest) -> BranchInfo:
-        return BranchInfo(
-            repo_full_name=request.repo_full_name, branch_name=request.branch_name
-        )
+        return BranchInfo(repo_full_name=request.repo_full_name, branch_name=request.branch_name)
 
-    def create_pull_request(
-        self, request: CreatePullRequestRequest
-    ) -> PullRequestInfo:
+    def create_pull_request(self, request: CreatePullRequestRequest) -> PullRequestInfo:
         return PullRequestInfo(
             repo_full_name=request.repo_full_name,
             pr_number=1,
@@ -452,9 +435,7 @@ class _StubGitProvider:
         )
 
     def clone_repository(self, request: CloneRepositoryRequest) -> CloneResult:
-        return CloneResult(
-            repo_full_name=request.repo_full_name, dest_path=request.dest_path
-        )
+        return CloneResult(repo_full_name=request.repo_full_name, dest_path=request.dest_path)
 
 
 class _StubIssueTracker:
@@ -479,14 +460,10 @@ class _StubIssueTracker:
         )
 
     def create_issue(self, request: CreateIssueRequest) -> IssueInfo:
-        return IssueInfo(
-            project_id=request.project_id, issue_id="new-1", title=request.title
-        )
+        return IssueInfo(project_id=request.project_id, issue_id="new-1", title=request.title)
 
     def update_issue(self, request: UpdateIssueRequest) -> IssueInfo:
-        return IssueInfo(
-            project_id=request.project_id, issue_id=request.issue_id, title="Updated"
-        )
+        return IssueInfo(project_id=request.project_id, issue_id=request.issue_id, title="Updated")
 
     def list_issues(self, request: ListIssuesRequest) -> list[IssueInfo]:
         return []
@@ -548,9 +525,7 @@ class TestCapabilityDispatchPattern:
         caps = provider.capabilities()
 
         caps.require(ProviderCapability.FETCH_REPOSITORY)
-        result = provider.fetch_repository(
-            FetchRepositoryRequest(repo_full_name="owner/repo")
-        )
+        result = provider.fetch_repository(FetchRepositoryRequest(repo_full_name="owner/repo"))
         assert result.repo_full_name == "owner/repo"
 
     def test_require_raises_for_unsupported_operation(self):
@@ -565,9 +540,7 @@ class TestCapabilityDispatchPattern:
 
         class AnotherGitProvider:
             def provider_info(self) -> ProviderInfo:
-                return ProviderInfo(
-                    provider_id="another-git", display_name="Another Git"
-                )
+                return ProviderInfo(provider_id="another-git", display_name="Another Git")
 
             def capabilities(self) -> CapabilitySet:
                 return CapabilitySet(
@@ -593,9 +566,7 @@ class TestCapabilityDispatchPattern:
                     branch_name=request.branch_name,
                 )
 
-            def create_pull_request(
-                self, request: CreatePullRequestRequest
-            ) -> PullRequestInfo:
+            def create_pull_request(self, request: CreatePullRequestRequest) -> PullRequestInfo:
                 return PullRequestInfo(
                     repo_full_name=request.repo_full_name,
                     pr_number=99,
@@ -624,9 +595,7 @@ class TestCapabilityDispatchPattern:
             caps = provider.capabilities()
             caps.require(ProviderCapability.CREATE_PULL_REQUEST)
             return provider.create_pull_request(
-                CreatePullRequestRequest(
-                    repo_full_name=repo, head_branch=head, title=title
-                )
+                CreatePullRequestRequest(repo_full_name=repo, head_branch=head, title=title)
             )
 
         stub = _StubGitProvider()

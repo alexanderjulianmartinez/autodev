@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from autodev.github.adapters.git_platform import (
-    GitHubGitAdapter,
     REQUIRED_SETTINGS,
+    GitHubGitAdapter,
     _format_pr_body,
     build_github_git_adapter,
 )
 from autodev.integrations import (
-    CapabilitySet,
     IntegrationRegistry,
     IntegrationsConfig,
     ProviderCapability,
@@ -32,7 +30,6 @@ from autodev.integrations.git_provider import (
     PullRequestInfo,
     RepositoryInfo,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers — mock PyGithub objects
@@ -83,9 +80,7 @@ class TestProtocolCompliance:
         assert adapter.provider_info().base_url == "https://api.github.com"
 
     def test_custom_base_url(self):
-        adapter = GitHubGitAdapter(
-            {"token": "t", "base_url": "https://github.example.com"}
-        )
+        adapter = GitHubGitAdapter({"token": "t", "base_url": "https://github.example.com"})
         assert adapter.provider_info().base_url == "https://github.example.com"
 
     def test_capabilities_covers_all_git_operations(self):
@@ -364,9 +359,7 @@ class TestGetDiff:
         mock_gh.get_repo.return_value = mock_repo
 
         result = adapter.get_diff(
-            GetDiffRequest(
-                repo_full_name="owner/repo", base_ref="main", head_ref="feature/x"
-            )
+            GetDiffRequest(repo_full_name="owner/repo", base_ref="main", head_ref="feature/x")
         )
 
         assert isinstance(result, DiffResult)
@@ -382,9 +375,7 @@ class TestGetDiff:
         mock_gh.get_repo.return_value = mock_repo
 
         adapter.get_diff(
-            GetDiffRequest(
-                repo_full_name="owner/repo", base_ref="v1.0", head_ref="v2.0"
-            )
+            GetDiffRequest(repo_full_name="owner/repo", base_ref="v1.0", head_ref="v2.0")
         )
 
         mock_repo.compare.assert_called_once_with("v1.0", "v2.0")
@@ -417,9 +408,7 @@ class TestGetDiff:
         mock_gh.get_repo.return_value = mock_repo
 
         result = adapter.get_diff(
-            GetDiffRequest(
-                repo_full_name="owner/repo", base_ref="main", head_ref="feature/x"
-            )
+            GetDiffRequest(repo_full_name="owner/repo", base_ref="main", head_ref="feature/x")
         )
 
         assert result.diff_text == ""
@@ -471,9 +460,7 @@ class TestCloneRepository:
         monkeypatch.setattr(adapter._git_tool, "clone", lambda url, dest: dest)
 
         result = adapter.clone_repository(
-            CloneRepositoryRequest(
-                repo_full_name="owner/repo", dest_path="/tmp/repo", ref="v1.2.3"
-            )
+            CloneRepositoryRequest(repo_full_name="owner/repo", dest_path="/tmp/repo", ref="v1.2.3")
         )
 
         assert result.ref == "v1.2.3"
@@ -527,9 +514,7 @@ class TestFactory:
         assert isinstance(adapter, GitHubGitAdapter)
 
     def test_settings_passed_through(self):
-        adapter = build_github_git_adapter(
-            {"token": "tok", "base_url": "https://ghe.example.com"}
-        )
+        adapter = build_github_git_adapter({"token": "tok", "base_url": "https://ghe.example.com"})
         assert adapter._token == "tok"
         assert adapter._base_url == "https://ghe.example.com"
 
@@ -545,13 +530,9 @@ class TestFactory:
 class TestRegistryIntegration:
     def test_registry_loads_github_adapter(self):
         registry = IntegrationRegistry()
-        registry.register_factory(
-            "github", build_github_git_adapter, requires=REQUIRED_SETTINGS
-        )
+        registry.register_factory("github", build_github_git_adapter, requires=REQUIRED_SETTINGS)
         registry.load(
-            IntegrationsConfig(
-                git=ProviderConfig(provider="github", settings={"token": "t"})
-            )
+            IntegrationsConfig(git=ProviderConfig(provider="github", settings={"token": "t"}))
         )
         provider = registry.resolve(ProviderCapability.CREATE_PULL_REQUEST)
         assert isinstance(provider, GitHubGitAdapter)
@@ -560,25 +541,15 @@ class TestRegistryIntegration:
         from autodev.core.config import ConfigError
 
         registry = IntegrationRegistry()
-        registry.register_factory(
-            "github", build_github_git_adapter, requires=REQUIRED_SETTINGS
-        )
+        registry.register_factory("github", build_github_git_adapter, requires=REQUIRED_SETTINGS)
         with pytest.raises(ConfigError, match="token"):
-            registry.load(
-                IntegrationsConfig(
-                    git=ProviderConfig(provider="github", settings={})
-                )
-            )
+            registry.load(IntegrationsConfig(git=ProviderConfig(provider="github", settings={})))
 
     def test_supports_all_git_capabilities_after_load(self):
         registry = IntegrationRegistry()
-        registry.register_factory(
-            "github", build_github_git_adapter, requires=REQUIRED_SETTINGS
-        )
+        registry.register_factory("github", build_github_git_adapter, requires=REQUIRED_SETTINGS)
         registry.load(
-            IntegrationsConfig(
-                git=ProviderConfig(provider="github", settings={"token": "t"})
-            )
+            IntegrationsConfig(git=ProviderConfig(provider="github", settings={"token": "t"}))
         )
         for cap in (
             ProviderCapability.FETCH_REPOSITORY,

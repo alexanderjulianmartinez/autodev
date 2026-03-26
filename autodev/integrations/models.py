@@ -52,9 +52,7 @@ class EntityRef(AutoDevModel):
             "'ci_run', 'alert', 'document', 'message'."
         )
     )
-    entity_id: str = Field(
-        description="Provider-local identifier (number, slug, UUID, etc.)."
-    )
+    entity_id: str = Field(description="Provider-local identifier (number, slug, UUID, etc.).")
     url: str = Field(default="", description="Canonical URL for the entity.")
     display: str = Field(
         default="",
@@ -92,9 +90,7 @@ class ErrorEvent(AutoDevModel):
             "'runtime', 'git', 'issue_tracker', 'messaging', 'docs'."
         )
     )
-    severity: str = Field(
-        description="Severity level: 'critical', 'error', 'warning', or 'info'."
-    )
+    severity: str = Field(description="Severity level: 'critical', 'error', 'warning', or 'info'.")
     category: str = Field(
         description=(
             "Error category: 'test_failure', 'lint_error', 'build_error', "
@@ -106,9 +102,7 @@ class ErrorEvent(AutoDevModel):
         default="", description="Extended description, log excerpt, or error message."
     )
     stack_trace: str = Field(default="", description="Stack trace, if available.")
-    occurred_at: str = Field(
-        default="", description="ISO-8601 timestamp when the error occurred."
-    )
+    occurred_at: str = Field(default="", description="ISO-8601 timestamp when the error occurred.")
     source_ref: Optional[EntityRef] = Field(
         default=None,
         description="Pointer back to the source entity (CI run, alert, etc.).",

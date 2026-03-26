@@ -131,7 +131,11 @@ def _text_to_adf(text: str) -> dict[str, Any]:
     content: list[dict[str, Any]] = [
         {"type": "paragraph", "content": [{"type": "text", "text": p}]} for p in paragraphs
     ]
-    return {"version": 1, "type": "doc", "content": content or [{"type": "paragraph", "content": []}]}
+    return {
+        "version": 1,
+        "type": "doc",
+        "content": content or [{"type": "paragraph", "content": []}],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +299,7 @@ class JiraIssueTrackerAdapter:
 
         # Assignee
         assignee_obj = fields.get("assignee") or {}
-        assignee_name = (
-            assignee_obj.get("displayName") or assignee_obj.get("emailAddress") or ""
-        )
+        assignee_name = assignee_obj.get("displayName") or assignee_obj.get("emailAddress") or ""
 
         # Priority
         priority_raw = (fields.get("priority") or {}).get("name", "")

@@ -17,9 +17,6 @@ from autodev.integrations.base import (
     ProviderCapability,
     ProviderInfo,
 )
-from autodev.integrations.config import IntegrationsConfig, ProviderConfig
-from autodev.integrations.models import EntityRef, ErrorEvent
-from autodev.integrations.registry import IntegrationRegistry, ProviderFactory
 from autodev.integrations.ci_system import (
     CIJobInfo,
     CIRunInfo,
@@ -29,10 +26,11 @@ from autodev.integrations.ci_system import (
     ListRunsRequest,
     TriggerRunRequest,
 )
+from autodev.integrations.config import IntegrationsConfig, ProviderConfig
 from autodev.integrations.docs_provider import (
+    DocsProvider,
     DocumentInfo,
     DocumentSearchResult,
-    DocsProvider,
     FetchDocumentRequest,
     SearchDocumentsRequest,
     UpdateDocumentRequest,
@@ -66,6 +64,7 @@ from autodev.integrations.messaging import (
     MessagingSystem,
     SendMessageRequest,
 )
+from autodev.integrations.models import EntityRef, ErrorEvent
 from autodev.integrations.monitoring import (
     AlertInfo,
     FetchAlertsRequest,
@@ -74,6 +73,7 @@ from autodev.integrations.monitoring import (
     MonitoringSystem,
     QueryMetricsRequest,
 )
+from autodev.integrations.registry import IntegrationRegistry, ProviderFactory
 
 __all__ = [
     # config + registry

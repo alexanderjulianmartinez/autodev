@@ -165,9 +165,7 @@ class GitHubGitAdapter:
             created=True,
         )
 
-    def create_pull_request(
-        self, request: CreatePullRequestRequest
-    ) -> PullRequestInfo:
+    def create_pull_request(self, request: CreatePullRequestRequest) -> PullRequestInfo:
         """Open a pull request on GitHub, optionally linking issues.
 
         Issue references in ``request.issue_refs`` are appended to the PR

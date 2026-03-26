@@ -16,7 +16,6 @@ from autodev.integrations.normalize import (
     slugify,
 )
 
-
 # ---------------------------------------------------------------------------
 # EntityRef
 # ---------------------------------------------------------------------------
@@ -24,9 +23,7 @@ from autodev.integrations.normalize import (
 
 class TestEntityRef:
     def test_minimal(self):
-        ref = EntityRef(
-            provider_id="github", entity_type="issue", entity_id="owner/repo#42"
-        )
+        ref = EntityRef(provider_id="github", entity_type="issue", entity_id="owner/repo#42")
         assert ref.provider_id == "github"
         assert ref.url == ""
         assert ref.display == ""
@@ -72,9 +69,7 @@ class TestErrorEvent:
         assert event.labels == {}
 
     def test_with_source_ref(self):
-        ref = EntityRef(
-            provider_id="github", entity_type="ci_run", entity_id="12345"
-        )
+        ref = EntityRef(provider_id="github", entity_type="ci_run", entity_id="12345")
         event = ErrorEvent(
             event_id="ev-2",
             source="ci",

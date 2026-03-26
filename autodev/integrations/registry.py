@@ -83,9 +83,7 @@ _INTEGRATION_TYPE_CAPABILITIES: dict[str, frozenset[ProviderCapability]] = {
 
 # Reverse index: capability → integration type
 _CAPABILITY_TO_INTEGRATION_TYPE: dict[ProviderCapability, str] = {
-    cap: itype
-    for itype, caps in _INTEGRATION_TYPE_CAPABILITIES.items()
-    for cap in caps
+    cap: itype for itype, caps in _INTEGRATION_TYPE_CAPABILITIES.items() for cap in caps
 }
 
 #: Callable signature for provider factories.
@@ -173,17 +171,14 @@ class IntegrationRegistry:
             if slot is None:
                 continue
             self._providers[itype] = self._instantiate(itype, slot)
-            logger.debug(
-                "Loaded '%s' integration: provider=%s", itype, slot.provider
-            )
+            logger.debug("Loaded '%s' integration: provider=%s", itype, slot.provider)
 
     def _instantiate(self, itype: str, cfg: ProviderConfig) -> Any:
         pid = cfg.provider
         if pid not in self._factories:
             known = sorted(self._factories) or ["(none registered)"]
             raise ConfigError(
-                f"Integration '{itype}': unknown provider '{pid}'. "
-                f"Registered providers: {known}"
+                f"Integration '{itype}': unknown provider '{pid}'. Registered providers: {known}"
             )
         entry = self._factories[pid]
         missing = entry.requires - cfg.settings.keys()
@@ -223,9 +218,7 @@ class IntegrationRegistry:
         if itype is None:
             # Should not happen unless ProviderCapability gains new members
             # without a corresponding entry in _INTEGRATION_TYPE_CAPABILITIES.
-            raise LookupError(
-                f"No integration type is mapped to capability '{capability.value}'"
-            )
+            raise LookupError(f"No integration type is mapped to capability '{capability.value}'")
         return self.get(itype)
 
     def get(self, integration_type: str) -> Any:
